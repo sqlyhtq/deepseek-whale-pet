@@ -39,6 +39,9 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import android.graphics.drawable.GradientDrawable;
 import android.widget.Toast;
 
 import java.util.List;
@@ -68,15 +71,8 @@ public class PetService extends Service {
 
     /** 带停留时长的气泡（毫秒）。 */
     private void sayFor(final String text, final int ms) {
-        if (text == null) return;
-        final String js = "window.petSay && window.petSay("
-                + org.json.JSONObject.quote(text) + "," + ms + ")";
-        ui.post(() -> {
-            try {
-                if (web != null) web.evaluateJavascript(js, null);
-            } catch (Throwable ignored) {
-            }
-        });
+        if (text == null || text.isEmpty()) return;
+        ui.post(() -> showHudBubble(text, ms));
     }
 
     /** 让聊天页把回答同步显示在桌面气泡里。 */
@@ -123,10 +119,49 @@ public class PetService extends Service {
     private long lastIconAt = 0;
     private long lastA11yTry = 0;
     private boolean inertiaRunning = false;
+
+    // ---- 独立的气泡 / 面板浮窗 ----
+    private View hudRoot;
+    private TextView hudBubble;
+    private LinearLayout hudMenu;
+    private WindowManager.LayoutParams hudLp;
+    private int hudW, hudH;
+    private final Runnable hideHudBubble = () -> {
+        if (hudBubble != null) hudBubble.setVisibility(View.GONE);
+        syncHudWindow();
+    };
+    private final Runnable hideHudMenu = () -> {
+        if (hudMenu != null) hudMenu.setVisibility(View.GONE);
+        syncHudWindow();
+    };
+
+    /** 没内容时把 HUD 缩成 1x1 且不吃触摸，避免挡住桌面。 */
+    private void syncHudWindow() {
+        if (hudLp == null || hudRoot == null || wm == null) return;
+        boolean bubbleOn = hudBubble != null && hudBubble.getVisibility() == View.VISIBLE;
+        boolean menuOn = hudMenu != null && hudMenu.getVisibility() == View.VISIBLE;
+        if (bubbleOn || menuOn) {
+            hudLp.width = dp(200);
+            hudLp.height = menuOn ? dp(250) : dp(110);
+            hudLp.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                    | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+        } else {
+            hudLp.width = 1;
+            hudLp.height = 1;
+            hudLp.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                    | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                    | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+        }
+        try {
+            wm.updateViewLayout(hudRoot, hudLp);
+        } catch (Throwable ignored) {
+        }
+    }
     private boolean docked = false;
     private long lastDockTap = 0;
     private String lastForeground = "";
     private String lastPkg = "";
+    private String lastMenuSide = "";
     private String undockedForPkg = "";
     private boolean dockPending = true;
 
@@ -380,6 +415,8 @@ public class PetService extends Service {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setAllowFileAccess(true);
+        // 重新安装后 WebView 可能还在用旧页面缓存，禁掉
+        s.setCacheMode(android.webkit.WebSettings.LOAD_NO_CACHE);
         // ES module / fetch 要从 file:// 读 live2d 资源，必须放开这两个（已废弃但有效）
         s.setAllowFileAccessFromFileURLs(true);
         s.setAllowUniversalAccessFromFileURLs(true);
@@ -445,6 +482,11 @@ public class PetService extends Service {
                 }
             }
         });
+        try {
+            web.clearCache(true);
+            web.clearHistory();
+        } catch (Throwable ignored) {
+        }
         web.loadUrl("file:///android_asset/pet.html");
         root.addView(web, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
@@ -525,8 +567,44 @@ public class PetService extends Service {
         private int startX, startY;
         private boolean dragging = false;
 
+        @Override
+        public boolean onGenericMotionEvent(android.view.MotionEvent e) {
+            // 鼠标右键 → 打开面板
+            Log.i(TAG, "mouse button: " + e.getButtonState());
+            if (e.getAction() == android.view.MotionEvent.ACTION_BUTTON_PRESS
+                    && (e.getButtonState() & android.view.MotionEvent.BUTTON_SECONDARY) != 0) {
+                if (web != null) {
+                    web.evaluateJavascript("window.petShowMenu && window.petShowMenu()", null);
+                }
+                return true;
+            }
+            return super.onGenericMotionEvent(e);
+        }
+
+        @Override
+        public boolean onKeyDown(int keyCode, android.view.KeyEvent e) {
+            Log.i(TAG, "key down: " + keyCode);
+            if (keyCode == android.view.KeyEvent.KEYCODE_M) {
+                if (web != null) {
+                    web.evaluateJavascript("window.petShowMenu && window.petShowMenu()", null);
+                }
+                return true;
+            }
+            if (keyCode == android.view.KeyEvent.KEYCODE_ENTER
+                    || keyCode == android.view.KeyEvent.KEYCODE_SPACE) {
+                if (web != null) {
+                    web.evaluateJavascript("window.petDoubleTap && window.petDoubleTap()", null);
+                }
+                return true;
+            }
+            return super.onKeyDown(keyCode, e);
+        }
+
         DragLayout(Context c) {
             super(c);
+            setFocusable(true);
+            setFocusableInTouchMode(true);
+            setDescendantFocusability(FOCUS_BLOCK_DESCENDANTS);
         }
 
         @Override
@@ -670,6 +748,206 @@ public class PetService extends Service {
         } catch (Throwable t) {
             return dp(28);
         }
+    }
+
+    // ---- 两个独立小窗：气泡在头顶，面板在侧边 ----
+    private View bubbleWin, menuWin;
+    private TextView bubbleText;
+    private WindowManager.LayoutParams bubbleLp, menuLp;
+    private final Runnable hideBubble = () -> {
+        if (bubbleLp != null && bubbleWin != null) {
+            bubbleLp.width = 1;
+            bubbleLp.height = 1;
+            bubbleLp.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+            try { wm.updateViewLayout(bubbleWin, bubbleLp); } catch (Throwable ignored) {}
+        }
+    };
+    private final Runnable hideMenu = () -> {
+        if (menuLp != null && menuWin != null) {
+            menuLp.width = 1;
+            menuLp.height = 1;
+            menuLp.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+            try { wm.updateViewLayout(menuWin, menuLp); } catch (Throwable ignored) {}
+        }
+    };
+
+    private WindowManager.LayoutParams overlayLp(int w, int h) {
+        int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                : WindowManager.LayoutParams.TYPE_PHONE;
+        WindowManager.LayoutParams p = new WindowManager.LayoutParams(w, h, type,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT);
+        p.gravity = Gravity.TOP | Gravity.START;
+        return p;
+    }
+
+    private void ensureBubbleWin() {
+        if (bubbleWin != null) return;
+        bubbleText = new TextView(this);
+        bubbleText.setTextSize(13);
+        bubbleText.setTextColor(Color.parseColor("#27334F"));
+        bubbleText.setPadding(dp(11), dp(8), dp(11), dp(8));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.WHITE);
+        bg.setCornerRadius(dp(12));
+        bg.setStroke(dp(2), Color.parseColor("#27334F"));
+        bubbleText.setBackground(bg);
+        bubbleText.setMaxLines(4);
+        bubbleWin = bubbleText;
+        bubbleLp = overlayLp(1, 1);
+        bubbleLp.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        try { wm.addView(bubbleWin, bubbleLp); } catch (Throwable t) { bubbleWin = null; }
+    }
+
+    private void ensureMenuWin() {
+        if (menuWin != null) return;
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        String[] names = {"🎤 说话", "💬 聊天", "🫳 摸摸"};
+        for (int i = 0; i < names.length; i++) {
+            final int idx = i;
+            TextView b = new TextView(this);
+            b.setText(names[i]);
+            b.setTextSize(13);
+            b.setTextColor(Color.parseColor("#27334F"));
+            b.setPadding(dp(12), dp(8), dp(12), dp(8));
+            GradientDrawable g = new GradientDrawable();
+            g.setColor(Color.WHITE);
+            g.setCornerRadius(dp(10));
+            g.setStroke(dp(2), Color.parseColor("#27334F"));
+            b.setBackground(g);
+            LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp2.topMargin = dp(6);
+            box.addView(b, lp2);
+            b.setOnClickListener(v -> {
+                hideMenu.run();
+                if (idx == 0) startVoiceMode();
+                else if (idx == 1) showChat(false);
+                else sayFor("唔…摸头要经过我同意的。", 2200);
+            });
+        }
+        menuWin = box;
+        menuLp = overlayLp(1, 1);
+        menuLp.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        try { wm.addView(menuWin, menuLp); } catch (Throwable t) { menuWin = null; }
+    }
+
+    private void showHudBubble(String text, int ms) {
+        ensureBubbleWin();
+        if (bubbleWin == null) return;
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        int w = Math.min(dp(200), dm.widthPixels - dp(16));
+        bubbleText.setText(text);
+        bubbleLp.width = w;
+        bubbleLp.height = WindowManager.LayoutParams.WRAP_CONTENT;
+        bubbleLp.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+        placeBubble();
+        startHudLoop();
+        ui.removeCallbacks(hideBubble);
+        ui.postDelayed(hideBubble, Math.max(1200, ms));
+    }
+
+    private void showHudMenu() {
+        ensureMenuWin();
+        if (menuWin == null) return;
+        menuLp.width = dp(150);
+        menuLp.height = WindowManager.LayoutParams.WRAP_CONTENT;
+        menuLp.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+        placeMenu();
+        startHudLoop();
+        ui.removeCallbacks(hideMenu);
+        ui.postDelayed(hideMenu, 6000);
+    }
+
+    /** 气泡贴在她头顶正上方并居中。 */
+    private void placeBubble() {
+        if (bubbleLp == null || bubbleWin == null || lp == null) return;
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        int w = bubbleLp.width > 1 ? bubbleLp.width : dp(180);
+        int x = lp.x + lp.width / 2 - w / 2;
+        x = Math.max(dp(6), Math.min(x, dm.widthPixels - w - dp(6)));
+        int y = lp.y - dp(56);
+        if (y < dp(30)) y = dp(30);
+        bubbleLp.x = x;
+        bubbleLp.y = y;
+        try { wm.updateViewLayout(bubbleWin, bubbleLp); } catch (Throwable ignored) {}
+    }
+
+    /** 面板放在她旁边：她靠左就放右边，靠右就放左边。 */
+    private void placeMenu() {
+        if (menuLp == null || menuWin == null || lp == null) return;
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        boolean petLeft = (lp.x + lp.width / 2) < dm.widthPixels / 2;
+        int w = menuLp.width > 1 ? menuLp.width : dp(150);
+        // 她的身体大致占窗口中间 60%，面板贴身体边而不是窗口边
+        int bodyRight = lp.x + (int) (lp.width * 0.80);
+        int bodyLeft = lp.x + (int) (lp.width * 0.20);
+        int x = petLeft ? bodyRight + dp(2) : bodyLeft - w - dp(2);
+        x = Math.max(dp(6), Math.min(x, dm.widthPixels - w - dp(6)));
+        int y = Math.max(dp(40), Math.min(lp.y + dp(78), dm.heightPixels - dp(240)));
+        menuLp.x = x;
+        menuLp.y = y;
+        try { wm.updateViewLayout(menuWin, menuLp); } catch (Throwable ignored) {}
+    }
+
+    private int lastBx = -9999, lastBy = -9999, lastMx = -9999, lastMy = -9999;
+    private boolean hudLoopRunning;
+
+    /** 她移动时让气泡和面板跟着走（只在位置真的变了才重排）。 */
+    private void followHud() {
+        try {
+            if (bubbleLp != null && bubbleWin != null && bubbleLp.width > 1) {
+                DisplayMetrics dm = getResources().getDisplayMetrics();
+                int w = bubbleLp.width;
+                int x = Math.max(dp(6), Math.min(lp.x + lp.width / 2 - w / 2, dm.widthPixels - w - dp(6)));
+                int y = Math.max(dp(30), lp.y - dp(56));
+                if (x != lastBx || y != lastBy) {
+                    lastBx = x; lastBy = y;
+                    bubbleLp.x = x; bubbleLp.y = y;
+                    try { wm.updateViewLayout(bubbleWin, bubbleLp); } catch (Throwable ignored) {}
+                }
+            }
+            if (menuLp != null && menuWin != null && menuLp.width > 1) {
+                DisplayMetrics dm = getResources().getDisplayMetrics();
+                boolean petLeft = (lp.x + lp.width / 2) < dm.widthPixels / 2;
+                int w = menuLp.width;
+                int bodyRight = lp.x + (int) (lp.width * 0.80);
+                int bodyLeft = lp.x + (int) (lp.width * 0.20);
+                int x = Math.max(dp(6), Math.min(petLeft ? bodyRight + dp(2) : bodyLeft - w - dp(2),
+                        dm.widthPixels - w - dp(6)));
+                int y = Math.max(dp(40), Math.min(lp.y + dp(78), dm.heightPixels - dp(240)));
+                if (x != lastMx || y != lastMy) {
+                    lastMx = x; lastMy = y;
+                    menuLp.x = x; menuLp.y = y;
+                    try { wm.updateViewLayout(menuWin, menuLp); } catch (Throwable ignored) {}
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 跟随用的 120fps 循环，仅在气泡/面板可见时跑。 */
+    private void startHudLoop() {
+        if (hudLoopRunning) return;
+        hudLoopRunning = true;
+        ui.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                boolean visible = (bubbleLp != null && bubbleLp.width > 1)
+                        || (menuLp != null && menuLp.width > 1);
+                if (!visible || !isRunning) {
+                    hudLoopRunning = false;
+                    return;
+                }
+                followHud();
+                ui.postDelayed(this, 8);
+            }
+        }, 8);
     }
 
     /** 横竖屏切换或分辨率变化后，重新夹取两个窗口的位置和尺寸。 */
@@ -1270,6 +1548,11 @@ public class PetService extends Service {
                 lp.width = fullW;
                 lp.height = fullH;
                 lp.flags = fullFlags;
+                try {
+                    root.setFocusable(true);
+                    root.requestFocus();
+                } catch (Throwable ignored) {
+                }
                 lp.x = lastX;
                 lp.y = lastY;
                 root.setAlpha(1f);
@@ -1462,6 +1745,16 @@ public class PetService extends Service {
                     Toast.makeText(PetService.this, m, Toast.LENGTH_SHORT).show();
                 }
             });
+        }
+
+        @JavascriptInterface
+        public void bubble(final String text, final int ms) {
+            ui.post(() -> showHudBubble(text, ms));
+        }
+
+        @JavascriptInterface
+        public void bubbleMenu() {
+            ui.post(() -> showHudMenu());
         }
 
         @JavascriptInterface

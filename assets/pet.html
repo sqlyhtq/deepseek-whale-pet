@@ -13,6 +13,24 @@
         opacity:0;transform:translateY(-4px);pointer-events:none;z-index:5;
         transition:opacity .16s ease,transform .16s ease}
   .menu.show{opacity:1;transform:translateY(0);pointer-events:auto}
+  /* 她靠近哪边，菜单就放到窗口的另一侧 */
+  .menu.side-left,.menu.side-right{
+    top:50%;transform:translateY(-50%);flex-direction:column;gap:6px;
+    left:auto;right:auto;width:auto;
+  }
+  .menu.side-left{left:2px;align-items:flex-start}
+  .menu.side-right{right:2px;align-items:flex-end}
+  /* 面板在侧边时，气泡让出那一条，避免压到按钮 */
+  .bubble.avoid-right{right:56px}
+  .bubble.avoid-left{left:56px}
+  /* 横屏：气泡挪到面板对面，竖排窄条 */
+  @media (orientation: landscape) {
+    .bubble.slim-right{right:auto;left:2px;width:46%;top:50%;
+      transform:translateY(-50%);text-align:left}
+    .bubble.slim-left{left:auto;right:2px;width:46%;top:50%;
+      transform:translateY(-50%);text-align:left}
+    .bubble.slim-right.show,.bubble.slim-left.show{transform:translateY(-50%)}
+  }
   .menu button{border:2px solid #27334f;background:rgba(255,255,255,.94);color:#27334f;
     font:700 11px/1 inherit;padding:6px 6px;border-radius:9px;
     box-shadow:0 2px 0 rgba(39,51,79,.25);white-space:nowrap}
@@ -23,6 +41,7 @@
     box-shadow:0 3px 0 rgba(39,51,79,.16);opacity:0;transition:opacity .16s,transform .16s;
     pointer-events:none}
   .bubble.show{opacity:1;transform:translateY(0);pointer-events:auto}
+
   #stage{position:absolute;left:0;right:0;top:0;bottom:0;overflow:hidden}
 
   /* 贴边时露出的把手，避免“她躲起来就找不到了” */
@@ -69,13 +88,28 @@
   function cancelTapTimer() { clearTimeout(tapTimer); tapTimer = null; }
 
   function say(t, ms) {
-    bubble.textContent = t; bubble.classList.add('show');
-    clearTimeout(say._t); say._t = setTimeout(function(){ bubble.classList.remove('show'); }, ms || bubbleMs);
+    try { PetHost.bubble(String(t), ms || bubbleMs); } catch (e) {}
   }
+  var menuSide = 'right';
+  function applyMenuLayout() {
+    var both = menu.classList.contains('show') && bubble.classList.contains('show');
+    var left = both && menuSide === 'left';
+    var right = both && menuSide === 'right';
+    menu.classList.toggle('side-left', left);
+    menu.classList.toggle('side-right', right);
+    bubble.classList.toggle('avoid-left', left);
+    bubble.classList.toggle('avoid-right', right);
+
+    // 横屏：气泡放到面板的另一侧，错开显示
+    var landscape = window.innerWidth > window.innerHeight;
+    bubble.classList.remove('slim-left', 'slim-right');
+    if (both && landscape) {
+      bubble.classList.add(menuSide === 'right' ? 'slim-right' : 'slim-left');
+    }
+  }
+
   function showMenu(on) {
-    menu.classList.toggle('show', on);
-    clearTimeout(showMenu._t);
-    if (on) showMenu._t = setTimeout(function(){ menu.classList.remove('show'); }, 4200);
+    if (on) { try { PetHost.bubbleMenu(); } catch (e) {} }
   }
   function pose(w) { if (!body) return; try { body.do(w); } catch (e) {} }
 
@@ -220,6 +254,13 @@
   // ---- 横穿桌面：她迈步，窗口跟着挪 ----
   var walking = false;
   var roamEnabled = true;
+  window.petShowMenu = function () { showMenu(true); };
+
+  window.petSetMenuSide = function (side) {
+    menuSide = side || '';
+    applyMenuLayout();
+  };
+
   window.petSetDocked = function (side) {
     document.body.classList.remove('dock-left', 'dock-right');
     if (side < 0) {
@@ -281,6 +322,27 @@
     requestAnimationFrame(tick);
   }
   setTimeout(roam, 6000);
+
+  // 鼠标右键 / 长按菜单键 → 打开面板
+  document.addEventListener('contextmenu', function (e) {
+    e.preventDefault();
+    showMenu(true);
+  });
+  document.addEventListener('pointerdown', function (e) {
+    if (e.button === 2) {
+      e.preventDefault();
+      showMenu(true);
+    }
+  });
+
+  // 键盘：Enter/空格 = 互动，M = 面板
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'm' || e.key === 'M') { showMenu(true); }
+    else if (e.key === 'Enter' || e.key === ' ') {
+      showMenu(false);
+      window.petDoubleTap();
+    }
+  });
 
   stage.addEventListener('click', function (e) {
     e.stopPropagation();

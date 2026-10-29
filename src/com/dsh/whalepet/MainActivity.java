@@ -275,6 +275,19 @@ public class MainActivity extends Activity {
             }
         });
 
+        android.widget.Switch dockHomeSwitch = new android.widget.Switch(this);
+        dockHomeSwitch.setText("桌面上贴边隐藏（默认关：允许她卡在屏幕边）");
+        dockHomeSwitch.setTextSize(13);
+        dockHomeSwitch.setChecked(getSharedPreferences("pet", MODE_PRIVATE)
+                .getBoolean("dockOnHome", false));
+        dockHomeSwitch.setOnCheckedChangeListener((btn, checked) ->
+                getSharedPreferences("pet", MODE_PRIVATE).edit()
+                        .putBoolean("dockOnHome", checked).apply());
+        LinearLayout.LayoutParams dhslp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        dhslp.topMargin = dp(12);
+        root.addView(dockHomeSwitch, dhslp);
+
         android.widget.Switch floatSwitch = new android.widget.Switch(this);
         floatSwitch.setText("打开其他应用时用浮窗（游戏里推荐）");
         floatSwitch.setTextSize(13);

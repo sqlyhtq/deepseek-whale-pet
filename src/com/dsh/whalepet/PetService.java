@@ -228,6 +228,10 @@ public class PetService extends Service {
         return voiceIn != null && voiceIn.isRunning();
     }
 
+    private boolean dockOnHome() {
+        return getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("dockOnHome", false);
+    }
+
     private boolean edgeMode() {
         return getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("edgeMode", true);
     }
@@ -699,7 +703,8 @@ public class PetService extends Service {
                             undock();
                             return true;
                         }
-                        if (wasDragging && edgeMode() && lp != null) {
+                        if (wasDragging && edgeMode() && lp != null
+                                && (dockOnHome() || inOtherApp())) {
                             DisplayMetrics dm2 = getResources().getDisplayMetrics();
                             // 只有真的贴到边上才收，留出 40dp 容差
                             if (lp.x < dp(40)) {
@@ -708,9 +713,13 @@ public class PetService extends Service {
                                 dockToEdge(1);
                             }
                         }
-                        if (wasDragging && speed > 600) {
-                            // 松手带惯性：继续滑行并撞边反弹
-                            startInertia(false, vx, vy);
+                        if (wasDragging && speed > 1200) {
+                            // 只有“甩出去”才带惯性；慢慢拖到边上松手就停在那
+                            float ivx = vx, ivy = vy;
+                            DisplayMetrics dmi = getResources().getDisplayMetrics();
+                            if (lp.x <= dp(2) && ivx < 0) ivx = 0;
+                            if (lp.x >= dmi.widthPixels - lp.width - dp(2) && ivx > 0) ivx = 0;
+                            startInertia(false, ivx, ivy);
                         }
                         if (wasDragging && speed > 1800) {
                             // 快速甩出去
@@ -845,6 +854,7 @@ public class PetService extends Service {
         bubbleLp.height = WindowManager.LayoutParams.WRAP_CONTENT;
         bubbleLp.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+        lastBx = lastBy = -9999;
         placeBubble();
         startHudLoop();
         ui.removeCallbacks(hideBubble);
@@ -858,24 +868,64 @@ public class PetService extends Service {
         menuLp.height = WindowManager.LayoutParams.WRAP_CONTENT;
         menuLp.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+        lastMx = lastMy = -9999;
         placeMenu();
         startHudLoop();
         ui.removeCallbacks(hideMenu);
         ui.postDelayed(hideMenu, 6000);
     }
 
-    /** 气泡贴在她头顶正上方并居中。 */
+    /** 气泡：优先头顶居中；贴近屏幕顶部时改到她身体侧面（面板的反方向）。 */
     private void placeBubble() {
         if (bubbleLp == null || bubbleWin == null || lp == null) return;
         DisplayMetrics dm = getResources().getDisplayMetrics();
         int w = bubbleLp.width > 1 ? bubbleLp.width : dp(180);
-        int x = lp.x + lp.width / 2 - w / 2;
-        x = Math.max(dp(6), Math.min(x, dm.widthPixels - w - dp(6)));
-        int y = lp.y - dp(56);
-        if (y < dp(30)) y = dp(30);
-        bubbleLp.x = x;
-        bubbleLp.y = y;
-        try { wm.updateViewLayout(bubbleWin, bubbleLp); } catch (Throwable ignored) {}
+        int bh = bubbleText != null && bubbleText.getHeight() > 0 ? bubbleText.getHeight() : dp(64);
+
+        boolean freeMove = !dockOnHome();
+        int minX = freeMove ? -(w - dp(40)) : dp(6);
+        int maxX = freeMove ? dm.widthPixels - dp(40) : dm.widthPixels - w - dp(6);
+        boolean roomAbove = freeMove || lp.y - dp(10) - bh >= dp(30);
+        if (roomAbove) {
+            int x = Math.max(minX, Math.min(lp.x + lp.width / 2 - w / 2, maxX));
+            int y = Math.max(dp(30), lp.y - bh - dp(8));
+            if (x != lastBx || y != lastBy) {
+                lastBx = x; lastBy = y;
+                bubbleLp.x = x;
+                bubbleLp.y = y;
+                try { wm.updateViewLayout(bubbleWin, bubbleLp); } catch (Throwable ignored) {}
+            }
+            return;
+        }
+
+        // 顶部放不下：挪到侧面，并且优先选离屏幕边远的那侧
+        boolean menuOnLeft = menuLp != null && menuLp.width > 1 && (menuLp.x + menuLp.width / 2) < dm.widthPixels / 2;
+        boolean bubbleRight;
+        if (menuLp != null && menuLp.width > 1) {
+            bubbleRight = menuOnLeft;   // 面板在左 → 气泡在右
+        } else {
+            bubbleRight = (lp.x + lp.width / 2) < dm.widthPixels / 2;
+        }
+        int bodyRight = lp.x + (int) (lp.width * 0.80);
+        int bodyLeft = lp.x + (int) (lp.width * 0.20);
+        int wantX = bubbleRight ? bodyRight + dp(2) : bodyLeft - w - dp(2);
+
+        // 角落位置：两侧都塞不下时放到她下面
+        boolean noRoom = wantX < minX || wantX + w > dm.widthPixels - dp(6);
+        int x, y;
+        if (noRoom) {
+            x = Math.max(dp(6), Math.min(lp.x + lp.width / 2 - w / 2, dm.widthPixels - w - dp(6)));
+            y = Math.min(lp.y + lp.height + dp(6), dm.heightPixels - bh - dp(10));
+        } else {
+            x = wantX;
+            y = Math.max(dp(30), Math.min(lp.y + dp(24), dm.heightPixels - bh - dp(40)));
+        }
+        if (x != lastBx || y != lastBy) {
+            lastBx = x; lastBy = y;
+            bubbleLp.x = x;
+            bubbleLp.y = y;
+            try { wm.updateViewLayout(bubbleWin, bubbleLp); } catch (Throwable ignored) {}
+        }
     }
 
     /** 面板放在她旁边：她靠左就放右边，靠右就放左边。 */
@@ -890,43 +940,22 @@ public class PetService extends Service {
         int x = petLeft ? bodyRight + dp(2) : bodyLeft - w - dp(2);
         x = Math.max(dp(6), Math.min(x, dm.widthPixels - w - dp(6)));
         int y = Math.max(dp(40), Math.min(lp.y + dp(78), dm.heightPixels - dp(240)));
-        menuLp.x = x;
-        menuLp.y = y;
-        try { wm.updateViewLayout(menuWin, menuLp); } catch (Throwable ignored) {}
+        if (x != lastMx || y != lastMy) {
+            lastMx = x; lastMy = y;
+            menuLp.x = x;
+            menuLp.y = y;
+            try { wm.updateViewLayout(menuWin, menuLp); } catch (Throwable ignored) {}
+        }
     }
 
     private int lastBx = -9999, lastBy = -9999, lastMx = -9999, lastMy = -9999;
     private boolean hudLoopRunning;
 
-    /** 她移动时让气泡和面板跟着走（只在位置真的变了才重排）。 */
+    /** 她移动时让气泡和面板跟着走（内部有变更检测）。 */
     private void followHud() {
         try {
-            if (bubbleLp != null && bubbleWin != null && bubbleLp.width > 1) {
-                DisplayMetrics dm = getResources().getDisplayMetrics();
-                int w = bubbleLp.width;
-                int x = Math.max(dp(6), Math.min(lp.x + lp.width / 2 - w / 2, dm.widthPixels - w - dp(6)));
-                int y = Math.max(dp(30), lp.y - dp(56));
-                if (x != lastBx || y != lastBy) {
-                    lastBx = x; lastBy = y;
-                    bubbleLp.x = x; bubbleLp.y = y;
-                    try { wm.updateViewLayout(bubbleWin, bubbleLp); } catch (Throwable ignored) {}
-                }
-            }
-            if (menuLp != null && menuWin != null && menuLp.width > 1) {
-                DisplayMetrics dm = getResources().getDisplayMetrics();
-                boolean petLeft = (lp.x + lp.width / 2) < dm.widthPixels / 2;
-                int w = menuLp.width;
-                int bodyRight = lp.x + (int) (lp.width * 0.80);
-                int bodyLeft = lp.x + (int) (lp.width * 0.20);
-                int x = Math.max(dp(6), Math.min(petLeft ? bodyRight + dp(2) : bodyLeft - w - dp(2),
-                        dm.widthPixels - w - dp(6)));
-                int y = Math.max(dp(40), Math.min(lp.y + dp(78), dm.heightPixels - dp(240)));
-                if (x != lastMx || y != lastMy) {
-                    lastMx = x; lastMy = y;
-                    menuLp.x = x; menuLp.y = y;
-                    try { wm.updateViewLayout(menuWin, menuLp); } catch (Throwable ignored) {}
-                }
-            }
+            if (bubbleLp != null && bubbleLp.width > 1) placeBubble();
+            if (menuLp != null && menuLp.width > 1) placeMenu();
         } catch (Throwable ignored) {
         }
     }
@@ -1016,16 +1045,16 @@ public class PetService extends Service {
             float x = p.x + v[0] * dt;
             float y = p.y + v[1] * dt;
 
-            // 左右边界 + 反弹
-            if (x < 0) { x = 0; v[0] = -v[0] * restitution; }
+            // 左右边界 + 反弹（只有明显撞进去才反弹，贴着边不动就不弹）
+            if (x < 0) { x = 0; if (Math.abs(v[0]) > 240) v[0] = -v[0] * restitution; else v[0] = 0; }
             else if (x > dm.widthPixels - p.width) {
                 x = dm.widthPixels - p.width;
-                v[0] = -v[0] * restitution;
+                if (Math.abs(v[0]) > 240) v[0] = -v[0] * restitution; else v[0] = 0;
             }
             int minY = forChat ? 0 : -(p.height - dp(96) - statusBarHeight());
             int maxY = dm.heightPixels - (forChat ? dp(120) : dp(60));
-            if (y < minY) { y = minY; v[1] = -v[1] * restitution; }
-            else if (y > maxY) { y = maxY; v[1] = -v[1] * restitution; }
+            if (y < minY) { y = minY; if (Math.abs(v[1]) > 240) v[1] = -v[1] * restitution; else v[1] = 0; }
+            else if (y > maxY) { y = maxY; if (Math.abs(v[1]) > 240) v[1] = -v[1] * restitution; else v[1] = 0; }
 
             // 摩擦
             float damp = (float) Math.exp(-friction * dt);

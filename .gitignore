@@ -1,0 +1,15 @@
+# 构建产物
+build/
+*.apk
+*.idsig
+*.dex
+*.class
+
+# 本地环境
+local.properties
+.gradle/
+.DS_Store
+
+# 大模型（体积太大，不随仓库分发）
+assets/vosk/
+assets/live2d/whale/outfits/

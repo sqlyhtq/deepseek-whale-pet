@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>鲸鱼娘桌宠</title>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+  html,body{margin:0;height:100%;background:transparent;overflow:hidden}
+  body{font-family:"PingFang SC","Noto Sans CJK SC",sans-serif;color:#27334f}
+  .wrap{position:relative;width:100%;height:100%}
+  .menu{position:absolute;top:2px;left:0;right:0;justify-content:center;display:flex;gap:3px;
+        opacity:0;transform:translateY(-4px);pointer-events:none;z-index:5;
+        transition:opacity .16s ease,transform .16s ease}
+  .menu.show{opacity:1;transform:translateY(0);pointer-events:auto}
+  .menu button{border:2px solid #27334f;background:rgba(255,255,255,.94);color:#27334f;
+    font:700 11px/1 inherit;padding:6px 6px;border-radius:9px;
+    box-shadow:0 2px 0 rgba(39,51,79,.25);white-space:nowrap}
+  .menu button:active{transform:translateY(2px);box-shadow:none}
+  .bubble{position:absolute;left:3%;right:3%;top:6%;transform:translateY(4px);z-index:4;
+    padding:7px 10px;border-radius:12px;background:rgba(255,255,255,.96);border:2px solid #27334f;
+    font-size:12px;line-height:1.35;font-weight:600;text-align:center;
+    box-shadow:0 3px 0 rgba(39,51,79,.16);opacity:0;transition:opacity .16s,transform .16s;
+    pointer-events:none}
+  .bubble.show{opacity:1;transform:translateY(0)}
+  #stage{position:absolute;left:0;right:0;top:0;bottom:0;overflow:hidden}
+  #stage svg{width:100%;height:100%;display:block}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="menu" id="menu">
+    <button data-act="talk">🎤 说话</button>
+    <button data-act="chat">💬 聊天</button>
+    <button data-act="pat">摸摸</button>
+  </div>
+  <div class="bubble" id="bubble"></div>
+  <div id="stage"></div>
+</div>
+<script src="live2d/model.js"></script>
+<script src="live2d/l2d.js"></script>
+<script>
+(function () {
+  var stage = document.getElementById('stage');
+  var bubble = document.getElementById('bubble');
+  var menu = document.getElementById('menu');
+  var LINES = {
+    pat: ['唔…摸头要经过我同意的。', '哼，勉强算你手轻。', '再摸要按 token 收费了。'],
+    poke: ['干嘛，我正忙着发呆。', '用户别走，我上错模型了！', '今天的 token 额度用完啦？', '我在深度思考，别打断。']
+  };
+  var pick = function (a) { return a[(Math.random() * a.length) | 0]; };
+  var body = null, fps = 120, bubbleMs = 7000, lastW = 0, lastH = 0, tries = 0;
+  var lastTap = 0, tapTimer = null;
+  function cancelTapTimer() { clearTimeout(tapTimer); tapTimer = null; }
+
+  function say(t, ms) {
+    bubble.textContent = t; bubble.classList.add('show');
+    clearTimeout(say._t); say._t = setTimeout(function(){ bubble.classList.remove('show'); }, ms || bubbleMs);
+  }
+  function showMenu(on) {
+    menu.classList.toggle('show', on);
+    clearTimeout(showMenu._t);
+    if (on) showMenu._t = setTimeout(function(){ menu.classList.remove('show'); }, 4200);
+  }
+  function pose(w) { if (!body) return; try { body.do(w); } catch (e) {} }
+
+  function bigEnough() { return stage.clientWidth > 120 && stage.clientHeight > 120; }
+
+  function boot() {
+    if (!window.L2D) { say('骨骼脚本没加载', 6000); return; }
+    // 窗口隐藏时是 2x2，这时候建骨骼会按 0 尺寸画，所以等它真的显示出来
+    if (!bigEnough()) {
+      if (tries === 0) say('等我伸个懒腰…', 2000);
+      tries++;
+      setTimeout(boot, 300);
+      return;
+    }
+    L2D.createWhaleFigure(new URL('live2d/whale/', location.href), { model: window.__WHALE_MODEL })
+      .then(function (fig) {
+        var host = {
+          root: stage,
+          bounds: function () {
+            return {
+              W: stage.clientWidth, H: stage.clientHeight,
+              // 留出头发/尾巴的外扩余量，避免贴边时被窗口边裁掉
+              floorY: stage.clientHeight - 10,
+              S: Math.max(0.25, (stage.clientWidth - 18) / 268)
+            };
+          },
+          emit: function () {}, sound: function () {},
+          start: { x: stage.clientWidth / 2, facing: -1 }
+        };
+        body = L2D.createBody(host, { figure: fig });
+        try { body.set({ roam: 'off' }); } catch (e) {}   // 改由窗口移动驱动，舞台内不再自己遛
+        pose('stand');
+        lastW = stage.clientWidth; lastH = stage.clientHeight;
+        try { PetHost.logPose('rig ready ' + lastW + 'x' + lastH); } catch (e) {}
+      })
+      .catch(function (e) {
+        try { PetHost.logPose('fig-error: ' + e); } catch (err) {}
+        if (tries++ < 5) setTimeout(boot, 800);
+        else say('模型加载失败：' + e, 8000);
+      });
+  }
+  setTimeout(boot, 200);
+
+  // 尺寸变化（从隐藏恢复、改成大窗口）时重新布局
+  setInterval(function () {
+    if (!body) return;
+    var w = stage.clientWidth, h = stage.clientHeight;
+    if (w !== lastW || h !== lastH) {
+      lastW = w; lastH = h;
+      try { body.resize(); } catch (e) {}
+      try { PetHost.logPose('resize ' + w + 'x' + h); } catch (e) {}
+    }
+  }, 700);
+
+  var last = 0;
+  function loop(t) {
+    var dt = last ? Math.min(0.05, (t - last) / 1000) : 0.016;
+    last = t;
+    if (body && dt >= 1 / fps) { try { body.step(dt); } catch (e) {} }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  window.petSetBubble = function (sec) {
+    var v = Number(sec) || 7;
+    bubbleMs = Math.max(5, Math.min(15, v)) * 1000;
+  };
+  window.petSay = function (text, ms) {
+    if (!text) return;
+    say(String(text), ms || bubbleMs);
+    try { PetHost.logBubble(String(text)); } catch (e) {}
+  };
+  window.petReact = function (scene) {
+    var map = { listen: 'wink', think: 'neutral', speak: 'happy', sad: 'sad', wake: 'surprised', idle: 'neutral' };
+    pose(map[scene] || scene);
+    try { PetHost.logPose(map[scene] || scene); } catch (e) {}
+  };
+  window.petSetFps = function (n) { var v = Number(n) || 120; fps = Math.max(30, Math.min(120, v)); };
+  window.petGrab = function (on) {
+    if (!body) return;
+    try { body.do(on ? 'dizzy' : 'stand'); } catch (e) {}
+  };
+
+  // 双击：随机花式反应
+  var POKE = [
+    ['surprised', '呀！戳我干嘛！'],
+    ['shy', '别、别戳啦…'],
+    ['angry', '再戳要咬你了！'],
+    ['happy', '嘿嘿，被发现了。'],
+    ['wink', '想要点 token 吗？'],
+    ['hop', '跳一下给你看！'],
+    ['spin', '转一圈～'],
+    ['love', '你最好啦。']
+  ];
+  var pokeCool = 0;
+  window.petDoubleTap = function () {
+    cancelTapTimer();
+    showMenu(false);
+    if (!body) return;
+    var now = Date.now();
+    if (now - pokeCool < 700) return;
+    pokeCool = now;
+    var r = POKE[(Math.random() * POKE.length) | 0];
+    try { body.do(r[0]); } catch (e) {}
+    say(r[1], 2200);
+    setTimeout(function () {
+      try { body.do('stand'); } catch (e) {}
+    }, 1600);
+    try { PetHost.logPose('double-tap:' + r[0]); } catch (e) {}
+  };
+
+  // 被快速甩出去
+  window.petFling = function (speed) {
+    if (!body) return;
+    var hard = speed > 3600;
+    try { body.do(hard ? 'dizzy' : 'surprised'); } catch (e) {}
+    say(hard ? '呜哇——别甩我！' : '诶？！', 2400);
+    setTimeout(function () {
+      try { body.do('stand'); } catch (e) {}
+    }, 1800);
+    try { PetHost.logPose('fling:' + speed); } catch (e) {}
+  };
+
+  menu.querySelectorAll('button').forEach(function (b) {
+    b.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+    b.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var a = b.dataset.act;
+      if (a === 'talk') { try { PetHost.startVoice(); } catch (err) {} showMenu(false); return; }
+      if (a === 'chat') { try { PetHost.openChat(false); } catch (err) {} showMenu(false); return; }
+      if (a === 'pat') { say(pick(LINES.pat), 2200); pose('shy'); setTimeout(function(){ pose('stand'); }, 1800); showMenu(false); return; }
+      showMenu(false);
+    });
+  });
+
+  bubble.addEventListener('click', function (e) {
+    e.stopPropagation();
+    try { PetHost.openChat(false); } catch (err) {}
+    bubble.classList.remove('show');
+  });
+  bubble.style.pointerEvents = 'auto';
+
+  // ---- 横穿桌面：她迈步，窗口跟着挪 ----
+  var walking = false;
+  function metrics() {
+    try { return String(PetHost.metrics()).split(',').map(Number); } catch (e) { return [360, 800]; }
+  }
+  function pos() {
+    try { return String(PetHost.pos()).split(',').map(Number); } catch (e) { return [0, 0]; }
+  }
+  function roam() {
+    setTimeout(roam, 7000 + Math.random() * 8000);
+    if (walking || !body || menu.classList.contains('show')) return;
+    var m = metrics(), p = pos();
+    // 目标按「她的脚」算，再换算成窗口左上角：窗口宽 240、脚在距底 ~40 处
+    var feetX = 40 + Math.random() * Math.max(0, m[0] - 80);
+    var feetY = 110 + Math.random() * Math.max(0, m[1] - 190);
+    var tx = feetX - 120;
+    var ty = feetY - 240;
+    var dx = tx - p[0];
+    var dy = ty - p[1];
+    if (Math.abs(dx) < 50 && Math.abs(dy) < 60) return;
+
+    walking = true;
+    var dir = dx > 0 ? 1 : -1;
+    if (Math.abs(dx) < 30) dir = 0;
+    function step2() {
+      if (!walking) return;
+      var W = stage.clientWidth;
+      try { body.walk(dir > 0 ? W * 0.92 : W * 0.08, false, 'roam'); } catch (e) {}
+    }
+    step2();
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    var dur = Math.min(7000, 1400 + dist * 8);
+    var t0 = performance.now(), sx = 0, sy = 0, kick = 0;
+    function tick(t) {
+      var k = Math.min(1, (t - t0) / dur);
+      var ease = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      var wx = Math.round(dx * ease), wy = Math.round(dy * ease);
+      var ddx = wx - sx, ddy = wy - sy;
+      if (ddx !== 0 || ddy !== 0) {
+        sx = wx; sy = wy;
+        try { PetHost.movePet(ddx, ddy); } catch (e) {}
+      }
+      if (t - kick > 1400) { kick = t; step2(); }   // 保持步伐循环
+      if (k < 1) requestAnimationFrame(tick);
+      else {
+        walking = false;
+        try { body.do('stand'); } catch (e) {}
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+  setTimeout(roam, 6000);
+
+  stage.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var now = Date.now();
+    if (now - lastTap < 340) {
+      lastTap = 0;
+      cancelTapTimer();
+      window.petDoubleTap();
+      return;
+    }
+    lastTap = now;
+    cancelTapTimer();
+    // 等双击窗口过去再弹菜单，避免双击时菜单挡住气泡
+    tapTimer = setTimeout(function () {
+      tapTimer = null;
+      if (menu.classList.contains('show')) showMenu(false);
+      else { showMenu(true); say(pick(LINES.poke), 2000); pose('surprised'); setTimeout(function(){ pose('stand'); }, 900); }
+    }, 330);
+  });
+})();
+</script>
+</body>
+</html>

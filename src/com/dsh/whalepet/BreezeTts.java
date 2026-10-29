@@ -23,8 +23,8 @@ public class BreezeTts {
         String url = BASE + "/v1/text-to-speech/" + voiceId + "?output_format=mp3_24000_128";
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setRequestMethod("POST");
-        c.setConnectTimeout(15000);
-        c.setReadTimeout(60000);
+        c.setConnectTimeout(4000);
+        c.setReadTimeout(8000);
         c.setDoOutput(true);
         c.setRequestProperty("Content-Type", "application/json");
         c.setRequestProperty("xi-api-key", apiKey);

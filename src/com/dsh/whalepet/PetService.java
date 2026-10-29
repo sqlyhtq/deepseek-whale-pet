@@ -900,13 +900,14 @@ public class PetService extends Service {
             return;
         }
         boolean selfTop = top.equals(getPackageName());
-        // 只在自己 App 之外、且确实在桌面时显示：否则设置页会被她挡住
+        // 桌面或自己的 App 里都显示她（自己的 App 里方便预览她的状态）
         boolean onHome = (!homePkg.isEmpty() && top.equals(homePkg))
                 || top.startsWith("com.android.launcher")
-                || top.contains("launcher");
-        if (selfTop) onHome = false;
+                || top.contains("launcher")
+                || selfTop;
         boolean screenOk = isScreenOnAndUnlocked();
-        boolean show = onHome && screenOk;
+        // 聊天窗打开时她必须继续显示：此时前台可能被识别成我们自己的包
+        boolean show = (onHome || chat != null) && screenOk;
         if (tickCount++ % 10 == 0) {
             Log.d(TAG, "tick top=[" + top + "] show=" + show);
         }

@@ -138,6 +138,7 @@ public class VoiceInput {
                 int aliveTicks = 0;
                 long lastVoice = 0;
                 boolean heard = false;
+                boolean sentFinal = false;
                 long started = System.currentTimeMillis();
                 while (running) {
                     int n = record.read(buf, 0, buf.length);
@@ -158,7 +159,10 @@ public class VoiceInput {
                     }
                     if (rec.acceptWaveForm(buf, n)) {
                         String text = textOf(rec.getResult(), "text");
-                        if (!text.isEmpty()) main.post(() -> listener.onFinal(text));
+                        if (!text.isEmpty()) {
+                            sentFinal = true;
+                            main.post(() -> listener.onFinal(text));
+                        }
                         if (stopOnSilence) break;
                     } else {
                         String part = textOf(rec.getPartialResult(), "partial");
@@ -172,10 +176,14 @@ public class VoiceInput {
                         if (now - started > 30000) break;
                     }
                 }
-                if (stopOnSilence) {
+                if (stopOnSilence && !sentFinal) {
+                    // 只在还没送过最终结果时补一次，避免「没听清」紧跟一句正常回答
                     String text = textOf(rec.getFinalResult(), "text");
-                    final String t = text.isEmpty() ? "" : text;
-                    main.post(() -> listener.onFinal(t));
+                    if (!text.isEmpty()) {
+                        sentFinal = true;
+                        final String t = text;
+                        main.post(() -> listener.onFinal(t));
+                    }
                 }
             } catch (Throwable t) {
                 Log.w(TAG, "voice input failed: " + t);

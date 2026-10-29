@@ -23,10 +23,18 @@ public class Tts {
     private MediaPlayer player;
     private TextToSpeech sys;
     private File lastFile;
+    private static long breezeDownUntil;
+    private static long lastSpeakAt;   // 熔断：Breeze 失败后一段时间直接走 Edge
     private Runnable pendingDone;
 
     public Tts(Context ctx) {
         this.ctx = ctx.getApplicationContext();
+    }
+
+    /** 文本+音色的缓存文件，同一句话只合成一次。 */
+    private File cacheFile(String voice, String text) {
+        String key = (voice + "|" + text).hashCode() + "_" + text.length();
+        return new File(ctx.getCacheDir(), "tts_" + Math.abs(key.hashCode()) + ".mp3");
     }
 
     public void speak(final String text) {
@@ -35,8 +43,18 @@ public class Tts {
 
     public void speak(final String text, final Runnable onDone) {
         pendingDone = onDone;
-        String voice = prefs().getString(PREF_VOICE, "dafeiyu-clever");
+        final String voice = prefs().getString(PREF_VOICE, "dafeiyu-clever");
         Log.i("WhalePet", "speak() voice=" + voice + " text=" + text);
+
+        // 同一句话缓存过就直接播，省掉网络往返
+        final long t0 = System.currentTimeMillis();
+        lastSpeakAt = t0;
+        final File cached = cacheFile(voice, text);
+        if (cached.exists() && cached.length() > 1024) {
+            Log.i("WhalePet", "tts cache hit " + cached.length() + "B");
+            main.post(() -> play(cached));
+            return;
+        }
         if ("system".equals(voice)) {
             speakSystem(text);
             return;
@@ -48,18 +66,24 @@ public class Tts {
                 new Thread(() -> synthEdge(text, "xiaoyi")).start();
                 return;
             }
+            if (System.currentTimeMillis() < breezeDownUntil) {
+                Log.w("WhalePet", "breeze circuit open, use edge");
+                new Thread(() -> synthEdge(text, "xiaoyi")).start();
+                return;
+            }
             final String vid = "dafeiyu-dreamy".equals(voice) ? BreezeTts.DREAMY : BreezeTts.CLEVER;
             new Thread(() -> {
                 try {
                     byte[] mp3 = BreezeTts.synth(text, key, vid);
                     Log.i("WhalePet", "breeze tts ok: " + voice + " bytes=" + mp3.length);
-                    final File f = new File(ctx.getCacheDir(), "tts_" + System.nanoTime() + ".mp3");
+                    final File f = cacheFile(voice, text);
                     try (FileOutputStream fo = new FileOutputStream(f)) {
                         fo.write(mp3);
                     }
                     main.post(() -> play(f));
                 } catch (Exception e) {
-                    Log.w("WhalePet", "breeze-tts failed: " + e);
+                    breezeDownUntil = System.currentTimeMillis() + 10 * 60 * 1000;
+                    Log.w("WhalePet", "breeze-tts failed, circuit open 10min: " + e);
                     synthEdge(text, "xiaoyi");
                 }
             }).start();

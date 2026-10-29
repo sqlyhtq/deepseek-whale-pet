@@ -23,6 +23,17 @@ public final class ShellExec {
     private ShellExec() {
     }
 
+    /** 以自由窗口（浮窗）方式拉起某个包；成功返回 true。 */
+    public static boolean launchFloating(String pkg) {
+        String brief = sh("cmd package resolve-activity --brief " + pkg + " | tail -1");
+        if (brief == null) return false;
+        String comp = brief.trim();
+        if (!comp.contains("/")) return false;
+        String out = sh("cmd activity start-activity --windowingMode 5 -n " + comp);
+        Log.i(TAG, "floating launch " + comp + " -> " + out);
+        return out != null && (out.contains("Starting:") || out.contains("Activity:"));
+    }
+
     /** 用 shell 拉起某个包的主入口；成功返回 true。 */
     public static boolean launchPackage(Context ctx, String pkg) {
         String cmd = "monkey -p " + pkg + " -c android.intent.category.LAUNCHER 1 2>/dev/null"

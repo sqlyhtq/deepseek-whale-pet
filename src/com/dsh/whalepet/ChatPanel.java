@@ -9,6 +9,7 @@ import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Handler;
+import android.os.SystemClock;
 import android.os.Looper;
 import android.provider.Settings;
 import android.text.TextUtils;
@@ -52,6 +53,10 @@ public class ChatPanel extends android.widget.FrameLayout {
         void moveBy(int dx, int dy);
         void resizeEdge(int edge, int dx, int dy);
         void toggleMaximize();
+
+        /** 松手时的惯性：vx/vy 单位 px/s。 */
+        default void fling(float vx, float vy) {
+        }
     }
 
     private Host host;
@@ -108,6 +113,11 @@ public class ChatPanel extends android.widget.FrameLayout {
         build();
         tts = new Tts(ctx);
         if (!loadHistory()) addBubble("我在呢。点 🎤 说话，或者直接打字。", false);
+    }
+
+    /** 横竖屏切换后：窗口尺寸由服务端重算，这里只需要重新布局一次。 */
+    public void onScreenResized() {
+        post(this::requestLayout);
     }
 
     /** 像桌面窗口那样：四条边 + 四个角都能拖，拖哪边动哪边。 */
@@ -193,6 +203,8 @@ public class ChatPanel extends android.widget.FrameLayout {
             title.setOnTouchListener(new OnTouchListener() {
                 private float lastX, lastY;
                 private boolean dragging;
+                private float vx, vy;
+                private long lastT;
 
                 @Override
                 public boolean onTouch(View v, android.view.MotionEvent e) {
@@ -201,18 +213,31 @@ public class ChatPanel extends android.widget.FrameLayout {
                             lastX = e.getRawX();
                             lastY = e.getRawY();
                             dragging = false;
+                            vx = vy = 0;
+                            lastT = SystemClock.uptimeMillis();
                             return true;
                         case android.view.MotionEvent.ACTION_MOVE:
                             float dx = e.getRawX() - lastX;
                             float dy = e.getRawY() - lastY;
                             if (Math.abs(dx) + Math.abs(dy) > 6) dragging = true;
                             if (dragging) {
-                                android.util.Log.i("WhalePet", "drag dx=" + Math.round(dx) + " dy=" + Math.round(dy));
                                 host.moveBy(Math.round(dx), Math.round(dy));
+                                long now = SystemClock.uptimeMillis();
+                                long dt = Math.max(1, now - lastT);
+                                if (Math.abs(dx) + Math.abs(dy) > 1) {
+                                    vx = dx / dt * 1000f;
+                                    vy = dy / dt * 1000f;
+                                }
+                                lastT = now;
                                 lastX = e.getRawX();
                                 lastY = e.getRawY();
                             }
                             return dragging;
+                        case android.view.MotionEvent.ACTION_UP:
+                        case android.view.MotionEvent.ACTION_CANCEL:
+                            if (dragging) host.fling(vx, vy);
+                            dragging = false;
+                            return true;
                         default:
                             return dragging;
                     }

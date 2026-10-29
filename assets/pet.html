@@ -22,8 +22,20 @@
     font-size:12px;line-height:1.35;font-weight:600;text-align:center;
     box-shadow:0 3px 0 rgba(39,51,79,.16);opacity:0;transition:opacity .16s,transform .16s;
     pointer-events:none}
-  .bubble.show{opacity:1;transform:translateY(0)}
+  .bubble.show{opacity:1;transform:translateY(0);pointer-events:auto}
   #stage{position:absolute;left:0;right:0;top:0;bottom:0;overflow:hidden}
+
+  /* 贴边时露出的把手，避免“她躲起来就找不到了” */
+  .dock-hint{
+    position:absolute;top:50%;transform:translateY(-50%);display:none;
+    width:30px;height:86px;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+    background:rgba(255,255,255,.94);border:2px solid #27334f;border-radius:14px;
+    box-shadow:0 3px 10px rgba(39,51,79,.25);z-index:6;font-size:16px;line-height:1;
+    opacity:.92;
+  }
+  .dock-hint .arrow{font-size:15px;font-weight:700;color:#4A86D8}
+  body.dock-left .dock-hint{display:flex;right:2px}
+  body.dock-right .dock-hint{display:flex;left:2px}
   #stage svg{width:100%;height:100%;display:block}
 </style>
 </head>
@@ -36,6 +48,9 @@
   </div>
   <div class="bubble" id="bubble"></div>
   <div id="stage"></div>
+  <div class="dock-hint" id="dockHint">
+    <span>🐋</span><span class="arrow" id="dockArrow">‹</span>
+  </div>
 </div>
 <script src="live2d/model.js"></script>
 <script src="live2d/l2d.js"></script>
@@ -201,10 +216,21 @@
     try { PetHost.openChat(false); } catch (err) {}
     bubble.classList.remove('show');
   });
-  bubble.style.pointerEvents = 'auto';
 
   // ---- 横穿桌面：她迈步，窗口跟着挪 ----
   var walking = false;
+  var roamEnabled = true;
+  window.petSetDocked = function (side) {
+    document.body.classList.remove('dock-left', 'dock-right');
+    if (side < 0) {
+      document.body.classList.add('dock-left');
+      document.getElementById('dockArrow').textContent = '›';
+    } else if (side > 0) {
+      document.body.classList.add('dock-right');
+      document.getElementById('dockArrow').textContent = '‹';
+    }
+  };
+  window.petSetRoam = function (on) { roamEnabled = !!on; };
   function metrics() {
     try { return String(PetHost.metrics()).split(',').map(Number); } catch (e) { return [360, 800]; }
   }
@@ -213,7 +239,7 @@
   }
   function roam() {
     setTimeout(roam, 7000 + Math.random() * 8000);
-    if (walking || !body || menu.classList.contains('show')) return;
+    if (!roamEnabled || walking || !body || menu.classList.contains('show')) return;
     var m = metrics(), p = pos();
     // 目标按「她的脚」算，再换算成窗口左上角：窗口宽 240、脚在距底 ~40 处
     var feetX = 40 + Math.random() * Math.max(0, m[0] - 80);

@@ -245,6 +245,62 @@ public class MainActivity extends Activity {
         });
         root.addView(asrSpinner);
 
+        TextView il = new TextView(this);
+        int inertiaNow = getSharedPreferences("pet", MODE_PRIVATE).getInt("inertia", 60);
+        il.setText("拖动惯性：" + inertiaNow + "%");
+        il.setTextSize(13);
+        il.setTextColor(Color.parseColor("#5D739B"));
+        LinearLayout.LayoutParams illp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        illp.topMargin = dp(14);
+        root.addView(il, illp);
+
+        final android.widget.SeekBar inertiaBar = new android.widget.SeekBar(this);
+        inertiaBar.setMax(100);
+        inertiaBar.setProgress(Math.max(0, Math.min(100, inertiaNow)));
+        root.addView(inertiaBar);
+        inertiaBar.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(android.widget.SeekBar seekBar, int progress, boolean fromUser) {
+                il.setText(progress == 0 ? "拖动惯性：关闭" : "拖动惯性：" + progress + "%");
+                getSharedPreferences("pet", MODE_PRIVATE).edit().putInt("inertia", progress).apply();
+            }
+
+            @Override
+            public void onStartTrackingTouch(android.widget.SeekBar seekBar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(android.widget.SeekBar seekBar) {
+            }
+        });
+
+        android.widget.Switch floatSwitch = new android.widget.Switch(this);
+        floatSwitch.setText("打开其他应用时用浮窗（游戏里推荐）");
+        floatSwitch.setTextSize(13);
+        floatSwitch.setChecked(getSharedPreferences("pet", MODE_PRIVATE)
+                .getBoolean("floatInApps", false));
+        floatSwitch.setOnCheckedChangeListener((btn, checked) ->
+                getSharedPreferences("pet", MODE_PRIVATE).edit()
+                        .putBoolean("floatInApps", checked).apply());
+        LinearLayout.LayoutParams fslp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        fslp.topMargin = dp(12);
+        root.addView(floatSwitch, fslp);
+
+        android.widget.Switch edgeSwitch = new android.widget.Switch(this);
+        edgeSwitch.setText("在其他应用里也显示（贴边躲藏，点一下出来）");
+        edgeSwitch.setTextSize(13);
+        edgeSwitch.setChecked(getSharedPreferences("pet", MODE_PRIVATE)
+                .getBoolean("edgeMode", true));
+        edgeSwitch.setOnCheckedChangeListener((btn, checked) ->
+                getSharedPreferences("pet", MODE_PRIVATE).edit()
+                        .putBoolean("edgeMode", checked).apply());
+        LinearLayout.LayoutParams eslp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        eslp.topMargin = dp(12);
+        root.addView(edgeSwitch, eslp);
+
         final Button bigModel = new Button(this);
         bigModel.setText(BigModel.isReady(this) ? "大模型：已就绪 ✓" : "下载大模型（1.3GB，更准）");
         bigModel.setAllCaps(false);

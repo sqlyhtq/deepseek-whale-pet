@@ -362,7 +362,11 @@ public final class LocalSkills {
         final String label = bestLabel;
         new Thread(() -> {
             // 只走 shell 直启：不碰桌面手势、不开抽屉、不注入点击
-            boolean ok = ShellExec.launchPackage(appCtx, pkg);
+            boolean floating = PetService.isForegroundGame(appCtx)
+                    || appCtx.getSharedPreferences("pet", Context.MODE_PRIVATE)
+                            .getBoolean("floatInApps", false);
+            boolean ok = floating ? ShellExec.launchFloating(pkg) : false;
+            if (!ok) ok = ShellExec.launchPackage(appCtx, pkg);
             if (!ok) {
                 try {
                     appCtx.startActivity(intent);

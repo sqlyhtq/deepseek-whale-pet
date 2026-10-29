@@ -122,6 +122,126 @@ public class PetService extends Service {
     private static String CURRENT_ICON = "";
     private long lastIconAt = 0;
     private long lastA11yTry = 0;
+    private boolean inertiaRunning = false;
+    private boolean docked = false;
+    private long lastDockTap = 0;
+    private String lastForeground = "";
+    private String lastPkg = "";
+    private String undockedForPkg = "";
+    private boolean dockPending = true;
+
+    /** 当前前台是不是游戏（按包分类判断）。 */
+    /** 常见游戏包名特征，用来弥补 category 没标注的游戏。 */
+    private static final String[] GAME_HINTS = {
+            "tmgp", "mihoyo", "hypergryph", "gryphline", "neteas", "netease",
+            "garena", "supercell", "epicgames", "bilibili.game", "yostar",
+            "lilith", "hero.entertainment", "tencent.game", "com.tencent.tmgp"
+    };
+
+    public static boolean isForegroundGame(Context ctx) {
+        try {
+            String top = ForegroundReader.topPackage(ctx);
+            if (top == null || top.isEmpty()) return false;
+            if (top.equals(ctx.getPackageName())) return false;
+            android.content.pm.ApplicationInfo ai = ctx.getPackageManager()
+                    .getApplicationInfo(top, 0);
+            boolean byFlag = (ai.category & android.content.pm.ApplicationInfo.CATEGORY_GAME) != 0
+                    || (ai.flags & android.content.pm.ApplicationInfo.FLAG_IS_GAME) != 0;
+            boolean byName = false;
+            for (String h : GAME_HINTS) {
+                if (top.contains(h)) { byName = true; break; }
+            }
+            android.util.Log.i("WhalePet", "game check top=" + top + " flag=" + byFlag + " name=" + byName);
+            return byFlag || byName;
+        } catch (Throwable t) {
+            android.util.Log.w("WhalePet", "game check failed: " + t);
+            return false;
+        }
+    }
+
+    private boolean inOtherApp() {
+        String t = lastForeground;
+        if (t == null || t.isEmpty()) return false;
+        if (t.equals(getPackageName())) return false;
+        return !(t.contains("launcher"));
+    }
+
+    /** 在游戏/别的应用里，她出来一段时间没被碰就自己缩回边上。 */
+    private void scheduleRedock() {
+        // 用户主动把她拉出来后就留在原地，不再计时缩回
+    }
+
+    private final Runnable redockRunnable = new Runnable() {
+        @Override
+        public void run() {
+            // 自动缩回已停用
+        }
+    };          // 是否缩在屏幕边缘
+    private int dockSide = 1;                // -1 左, 1 右
+
+    private Boolean lastRoam;
+
+    private void setRoam(boolean on) {
+        if (lastRoam != null && lastRoam == on) return;
+        lastRoam = on;
+        if (web != null) {
+            web.evaluateJavascript("window.petSetRoam && window.petSetRoam(" + on + ")", null);
+        }
+    }
+
+    private boolean voiceBusyNow() {
+        return voiceIn != null && voiceIn.isRunning();
+    }
+
+    private boolean edgeMode() {
+        return getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("edgeMode", true);
+    }
+
+    /** 缩到屏幕左/右边缘，只露出一条可以点的边。 */
+    private void dockToEdge(int side) {
+        if (lp == null || wm == null || root == null) return;
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        dockSide = side;
+        docked = true;
+        int sliver = dp(34);
+        lp.x = side < 0 ? -(lp.width - sliver) : dm.widthPixels - sliver;
+        int minY = dp(30);
+        int maxY = Math.max(minY, dm.heightPixels - lp.height - dp(30));
+        lp.y = Math.max(minY, Math.min(lp.y, maxY));
+        try {
+            wm.updateViewLayout(root, lp);
+        } catch (Throwable ignored) {
+        }
+        if (web != null) {
+            web.evaluateJavascript("window.petSetRoam && window.petSetRoam(false)", null);
+            web.evaluateJavascript("window.petSetDocked && window.petSetDocked(" + side + ")", null);
+        }
+        // 贴边躲起来时顺手把聊天框收掉，别挡游戏
+        if (chat != null) hideChat();
+        Log.i(TAG, "dock to " + (side < 0 ? "left" : "right") + " x=" + lp.x);
+    }
+
+    /** 从边缘拉出来，位置保持在屏幕内。 */
+    private void undock() {
+        if (lp == null || wm == null || root == null || !docked) return;
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        docked = false;
+        int x = dockSide < 0 ? dp(12) : dm.widthPixels - lp.width - dp(12);
+        lp.x = Math.max(0, Math.min(x, dm.widthPixels - lp.width));
+        try {
+            wm.updateViewLayout(root, lp);
+        } catch (Throwable ignored) {
+        }
+        lastX = lp.x;
+        lastY = lp.y;
+        if (web != null) {
+            // 不要在这里强行开漫游：是否走动交给可见性 tick 判断（只在桌面走）
+            web.evaluateJavascript("window.petSetDocked && window.petSetDocked(0)", null);
+        }
+        undockedForPkg = lastPkg;   // 这个应用里不再自动贴边，除非用户再拖到边上
+        lastRoam = null;   // 让下一次 tick 重新下发漫游开关
+        Log.i(TAG, "undock x=" + lp.x);
+    }
     private long lastPartialAt = 0;
     private String announcedIcon = "";
 
@@ -354,6 +474,36 @@ public class PetService extends Service {
         lastX = lp.x;
         lastY = lp.y;
 
+        // 服务不一定能收到 ComponentCallbacks 的配置变化，再挂一个广播兜底
+        try {
+            android.content.BroadcastReceiver cfgRx = new android.content.BroadcastReceiver() {
+                @Override
+                public void onReceive(Context c, android.content.Intent i) {
+                    ui.postDelayed(PetService.this::onScreenChanged, 300);
+                }
+            };
+            android.content.IntentFilter f = new android.content.IntentFilter(
+                    android.content.Intent.ACTION_CONFIGURATION_CHANGED);
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(cfgRx, f, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(cfgRx, f);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "config receiver failed: " + t);
+        }
+
+        registerComponentCallbacks(new android.content.ComponentCallbacks() {
+            @Override
+            public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+                ui.post(PetService.this::onScreenChanged);
+            }
+
+            @Override
+            public void onLowMemory() {
+            }
+        });
+
         try {
             wm.addView(root, lp);
             isRunning = true;
@@ -383,6 +533,18 @@ public class PetService extends Service {
         public boolean onInterceptTouchEvent(MotionEvent ev) {
             switch (ev.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
+                    if (docked) {
+                        // 防误触：必须双击把手才拉出来，单击/滑动都不响应
+                        long t = SystemClock.uptimeMillis();
+                        if (t - lastDockTap < 420) {
+                            lastDockTap = 0;
+                            undock();
+                            scheduleRedock();
+                        } else {
+                            lastDockTap = t;
+                        }
+                        return true;
+                    }
                     downX = ev.getRawX();
                     downY = ev.getRawY();
                     startX = lp.x;
@@ -437,8 +599,11 @@ public class PetService extends Service {
                     float dxs = ev.getRawX() - lastX2;
                     float dys = ev.getRawY() - lastY2;
                     long dts = Math.max(1, now - lastMoveAt);
-                    vx = dxs / dts * 1000f;
-                    vy = dys / dts * 1000f;
+                    if (Math.abs(dxs) + Math.abs(dys) > 2) {
+                        // 忽略收尾时的零位移事件，否则松手速度会被抹成 0
+                        vx = dxs / dts * 1000f;
+                        vy = dys / dts * 1000f;
+                    }
                     lastX2 = ev.getRawX();
                     lastY2 = ev.getRawY();
                     lastMoveAt = now;
@@ -452,6 +617,23 @@ public class PetService extends Service {
                     dragging = false;
                     if (web != null) {
                         web.evaluateJavascript("window.petGrab && window.petGrab(false)", null);
+                        if (!wasDragging && docked) {
+                            undock();
+                            return true;
+                        }
+                        if (wasDragging && edgeMode() && lp != null) {
+                            DisplayMetrics dm2 = getResources().getDisplayMetrics();
+                            // 只有真的贴到边上才收，留出 40dp 容差
+                            if (lp.x < dp(40)) {
+                                dockToEdge(-1);
+                            } else if (lp.x + lp.width > dm2.widthPixels - dp(40)) {
+                                dockToEdge(1);
+                            }
+                        }
+                        if (wasDragging && speed > 600) {
+                            // 松手带惯性：继续滑行并撞边反弹
+                            startInertia(false, vx, vy);
+                        }
                         if (wasDragging && speed > 1800) {
                             // 快速甩出去
                             web.evaluateJavascript("window.petFling && window.petFling("
@@ -487,6 +669,113 @@ public class PetService extends Service {
             return id > 0 ? r.getDimensionPixelSize(id) : dp(28);
         } catch (Throwable t) {
             return dp(28);
+        }
+    }
+
+    /** 横竖屏切换或分辨率变化后，重新夹取两个窗口的位置和尺寸。 */
+    private void onScreenChanged() {
+        if (wm == null) return;
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        Log.i(TAG, "screen changed: " + dm.widthPixels + "x" + dm.heightPixels);
+
+        if (docked) {
+            dockToEdge(dockSide);
+            return;
+        }
+        // 桌宠：尺寸固定（dp），只把位置夹回新的屏幕范围
+        if (lp != null && root != null) {
+            int keepX = dp(80);
+            lp.x = Math.max(-lp.width + keepX, Math.min(lp.x, dm.widthPixels - keepX));
+            int minY = -(lp.height - dp(96) - statusBarHeight());
+            lp.y = Math.max(minY, Math.min(lp.y, dm.heightPixels - dp(60)));
+            try {
+                wm.updateViewLayout(root, lp);
+            } catch (Throwable ignored) {
+            }
+        }
+
+        // 聊天窗：按新屏幕重算尺寸，原位置尽量保留
+        if (chat != null && chatLp != null) {
+            int w = Math.min(dm.widthPixels - dp(20), dp(430));
+            int h = (int) (dm.heightPixels * 0.62);
+            chatLp.width = Math.max(dp(300), w);
+            chatLp.height = Math.max(dp(280), h);
+            chatLp.x = Math.max(0, Math.min(chatLp.x, dm.widthPixels - chatLp.width));
+            chatLp.y = Math.max(0, Math.min(chatLp.y, dm.heightPixels - chatLp.height));
+            try {
+                wm.updateViewLayout(chat, chatLp);
+            } catch (Throwable ignored) {
+            }
+            try {
+                chat.onScreenResized();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    /** 拖动惯性：松手后按速度滑行，撞到屏幕边反弹（弹性 0.45）。 */
+    private void startInertia(final boolean forChat, float vx, float vy) {
+        // 惯性强度（0=关闭，100=最长滑行）
+        int strength = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("inertia", 60);
+        if (strength <= 0) return;
+        final float s01 = Math.max(0f, Math.min(1f, strength / 100f));
+        final float friction = 4.2f - 3.2f * s01;      // 越强越滑
+        final float restitution = 0.30f + 0.25f * s01; // 越强弹得越高
+        if (Math.abs(vx) < 250 && Math.abs(vy) < 250) return;
+        cancelInertia();
+        final float[] v = {vx, vy};
+        final long[] last = {0L};
+        final Runnable[] step = new Runnable[1];
+        step[0] = () -> {
+            android.view.WindowManager.LayoutParams p = forChat ? chatLp : lp;
+            if (p == null || root == null) return;
+            DisplayMetrics dm = getResources().getDisplayMetrics();
+            long now = SystemClock.uptimeMillis();
+            if (last[0] == 0) last[0] = now;
+            float dt = Math.min(0.032f, (now - last[0]) / 1000f);
+            last[0] = now;
+
+            float x = p.x + v[0] * dt;
+            float y = p.y + v[1] * dt;
+
+            // 左右边界 + 反弹
+            if (x < 0) { x = 0; v[0] = -v[0] * restitution; }
+            else if (x > dm.widthPixels - p.width) {
+                x = dm.widthPixels - p.width;
+                v[0] = -v[0] * restitution;
+            }
+            int minY = forChat ? 0 : -(p.height - dp(96) - statusBarHeight());
+            int maxY = dm.heightPixels - (forChat ? dp(120) : dp(60));
+            if (y < minY) { y = minY; v[1] = -v[1] * restitution; }
+            else if (y > maxY) { y = maxY; v[1] = -v[1] * restitution; }
+
+            // 摩擦
+            float damp = (float) Math.exp(-friction * dt);
+            v[0] *= damp;
+            v[1] *= damp;
+
+            p.x = Math.round(x);
+            p.y = Math.round(y);
+            try {
+                wm.updateViewLayout(forChat ? chat : root, p);
+            } catch (Throwable ignored) {
+            }
+
+            if (Math.abs(v[0]) < 25 && Math.abs(v[1]) < 25 && Math.abs(v[0]) + Math.abs(v[1]) < 40) {
+                if (!forChat) { lastX = lp.x; lastY = lp.y; }
+                inertiaRunning = false;
+                return;
+            }
+            ui.postDelayed(step[0], 16);
+        };
+        inertiaRunning = true;
+        ui.post(step[0]);
+    }
+
+    private void cancelInertia() {
+        if (inertiaRunning) {
+            ui.removeCallbacksAndMessages(null);
+            inertiaRunning = false;
         }
     }
 
@@ -675,6 +964,11 @@ public class PetService extends Service {
                 @Override
                 public void toggleMaximize() {
                     toggleChatMaximize();
+                }
+
+                @Override
+                public void fling(float vx, float vy) {
+                    startInertia(true, vx, vy);
                 }
             });
             DisplayMetrics dm = getResources().getDisplayMetrics();
@@ -899,6 +1193,7 @@ public class PetService extends Service {
             // 没有新的前台事件：保持现状，别乱切
             return;
         }
+        lastForeground = top;
         boolean selfTop = top.equals(getPackageName());
         // 桌面或自己的 App 里都显示她（自己的 App 里方便预览她的状态）
         boolean onHome = (!homePkg.isEmpty() && top.equals(homePkg))
@@ -906,8 +1201,27 @@ public class PetService extends Service {
                 || top.contains("launcher")
                 || selfTop;
         boolean screenOk = isScreenOnAndUnlocked();
+        boolean edge = edgeMode();
         // 聊天窗打开时她必须继续显示：此时前台可能被识别成我们自己的包
-        boolean show = (onHome || chat != null) && screenOk;
+        boolean show = (onHome || chat != null || edge) && screenOk;
+        // 只有在桌面才让她自己溜达；在别的应用里保持原地
+        setRoam(onHome && !docked);
+        // 边缘模式：只在“刚切到这个应用”时贴边，之后她出来就留在原地
+        // 只按“包名”判断是否换了应用，同一个应用内部切窗口不算
+        String pkg = top.contains("/") ? top.substring(0, top.indexOf('/')) : top;
+        if (!pkg.equals(lastPkg)) {
+            lastPkg = pkg;
+            undockedForPkg = "";
+            dockPending = true;
+        }
+        if (edge && !onHome && chat == null && !voiceBusyNow()) {
+            if (!docked && dockPending && !pkg.equals(undockedForPkg)) {
+                dockPending = false;
+                dockToEdge(dockSide >= 0 ? 1 : -1);
+            }
+        } else if (docked && (onHome || chat != null)) {
+            undock();
+        }
         if (tickCount++ % 10 == 0) {
             Log.d(TAG, "tick top=[" + top + "] show=" + show);
         }

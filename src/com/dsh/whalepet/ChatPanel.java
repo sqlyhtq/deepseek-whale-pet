@@ -447,7 +447,7 @@ public class ChatPanel extends android.widget.FrameLayout {
         if (LocalSkills.wantsWeather(text)) {
             busy = true;
             status.setText("查天气…");
-            new Thread(() -> {
+            Bg.run(() -> {
                 final String saved = prefs().getString("weatherCity", "");
                 final String r = LocalSkills.weather(text, saved);
                 String c = LocalSkills.cleanCity(text);
@@ -462,10 +462,10 @@ public class ChatPanel extends android.widget.FrameLayout {
                     history.add(msgJson("assistant", r));
                     saveHistory();
                 });
-            }).start();
+            });
             return;
         }
-        final String key = prefs().getString("apiKey", "");
+        final String key = SecureStore.get(prefs(), "apiKey");
         final String base = prefs().getString("baseUrl", "https://api.deepseek.com");
         String m = prefs().getString("model", "deepseek-chat");
         final String model = (m == null || m.trim().isEmpty()) ? "deepseek-chat" : m.trim();
@@ -488,7 +488,7 @@ public class ChatPanel extends android.widget.FrameLayout {
         status.setText("思考中…");
         history.add(msgJson("user", text));
 
-        new Thread(() -> {
+        Bg.run(() -> {
             String reply;
             try {
                 reply = callApi(base, key, model);
@@ -516,7 +516,7 @@ public class ChatPanel extends android.widget.FrameLayout {
                 history.add(msgJson("assistant", r));
                 saveHistory();
             });
-        }).start();
+        });
     }
 
     private boolean loadHistory() {

@@ -75,6 +75,22 @@ public class PetService extends Service {
         ui.post(() -> showHudBubble(text, ms));
     }
 
+    private Tts flavorTts;
+
+    /** 气泡 + 语音（用于「打开应用」这类情景台词）。 */
+    public static void sayWithVoice(final String text) {
+        PetService svc = INSTANCE;
+        if (svc == null || text == null || text.isEmpty()) return;
+        svc.ui.post(() -> {
+            svc.showHudBubble(text, 4500);
+            try {
+                if (svc.flavorTts == null) svc.flavorTts = new Tts(svc);
+                svc.flavorTts.speak(text);
+            } catch (Throwable ignored) {
+            }
+        });
+    }
+
     /** 让聊天页把回答同步显示在桌面气泡里。 */
     public static void say(final String text) {
         PetService svc = INSTANCE;
@@ -119,6 +135,8 @@ public class PetService extends Service {
     private long lastIconAt = 0;
     private long lastA11yTry = 0;
     private boolean inertiaRunning = false;
+    private Runnable inertiaStep;
+    private android.content.BroadcastReceiver cfgReceiver;
 
     // ---- 独立的气泡 / 面板浮窗 ----
     private View hudRoot;
@@ -162,6 +180,39 @@ public class PetService extends Service {
     private String lastForeground = "";
     private String lastPkg = "";
     private String lastMenuSide = "";
+    private long nextScreenTalk;
+    private String lastScreenLine = "";
+
+    /** 偶尔看一眼屏幕上的文字，说一句相关的（只在本机匹配，不上传）。 */
+    private void maybeScreenTalk(String top) {
+        if (!getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("screenTalk", true)) return;
+        if (!PetA11yService.isReady()) return;
+        long now = SystemClock.uptimeMillis();
+        if (now < nextScreenTalk) return;
+        nextScreenTalk = now + 90_000 + (long) (Math.random() * 90_000);
+        Bg.run(() -> {
+            String text = PetA11yService.pageFingerprint();
+            if (text == null || text.isEmpty()) return;
+            String line = null;
+            if (text.contains("正在播放") || text.contains("播放中") || text.contains("视频")) {
+                line = "这视频看着不错。";
+            } else if (text.contains("发送") || text.contains("消息") || text.contains("聊天")) {
+                line = "有人找你？";
+            } else if (text.contains("胜利") || text.contains("失败") || text.contains("战绩")) {
+                line = "打得怎么样？";
+            } else if (text.contains("编辑") || text.contains("文档") || text.contains("保存")) {
+                line = "又在写东西呀。";
+            } else if (text.contains("导航") || text.contains("路线") || text.contains("公里")) {
+                line = "要出门？路上小心。";
+            } else if (text.contains("歌词") || text.contains("歌单") || text.contains("音乐")) {
+                line = "这首歌好听。";
+            }
+            if (line != null && !line.equals(lastScreenLine)) {
+                lastScreenLine = line;
+                sayWithVoice(line);
+            }
+        });
+    }
     private String undockedForPkg = "";
     private boolean dockPending = true;
 
@@ -309,7 +360,7 @@ public class PetService extends Service {
     /** 用 root/Shizuku 把无障碍服务打开（不会顶掉用户已有的其它服务）。 */
     private void ensureA11y() {
         final String me = getPackageName() + "/.PetA11yService";
-        new Thread(() -> {
+        Bg.run(() -> {
             String cur = ShellExec.sh("settings get secure enabled_accessibility_services");
             String list = cur == null ? "" : cur.trim();
             if (list.contains(getPackageName())) return;
@@ -318,7 +369,7 @@ public class PetService extends Service {
                     + "; settings put secure accessibility_enabled 1";
             String out = ShellExec.sh(cmd);
             Log.i(TAG, "ensureA11y -> " + (out == null ? "no shell" : "ok"));
-        }, "a11y-grant").start();
+        });
     }
 
     /** 每隔几秒看一下她脚下是哪个图标。 */
@@ -329,7 +380,7 @@ public class PetService extends Service {
         lastIconAt = now;
         final int cx = lp.x + lp.width / 2;
         final int cy = lp.y + (int) (lp.height * 0.9);
-        new Thread(() -> {
+        Bg.run(() -> {
             String label = PetA11yService.labelAt(cx, cy);
             if (label == null) label = "";
             final String found = label;
@@ -343,7 +394,7 @@ public class PetService extends Service {
                     }
                 }
             });
-        }, "icon-probe").start();
+        });
     }
 
     private long lastSpoke;
@@ -419,11 +470,11 @@ public class PetService extends Service {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setAllowFileAccess(true);
-        // 重新安装后 WebView 可能还在用旧页面缓存，禁掉
-        s.setCacheMode(android.webkit.WebSettings.LOAD_NO_CACHE);
-        // ES module / fetch 要从 file:// 读 live2d 资源，必须放开这两个（已废弃但有效）
+        // 页面用 <script src> 从 file:// 加载骨骼脚本、用 Image 加载贴图，必须放开
         s.setAllowFileAccessFromFileURLs(true);
         s.setAllowUniversalAccessFromFileURLs(true);
+        // 重新安装后 WebView 可能还在用旧页面缓存，禁掉
+        s.setCacheMode(android.webkit.WebSettings.LOAD_NO_CACHE);
         web.addJavascriptInterface(new Bridge(), "PetHost");
         // file:// 下 ES module / fetch 会被 CORS 拦死，改成内置虚拟域名 + 拦截请求直接读 assets
         web.setWebChromeClient(new android.webkit.WebChromeClient() {
@@ -468,6 +519,17 @@ public class PetService extends Service {
             }
 
             @Override
+            public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
+                Log.w(TAG, "render process gone, reload");
+                ui.postDelayed(() -> {
+                    try {
+                        if (web != null) web.loadUrl("file:///android_asset/pet.html");
+                    } catch (Throwable ignored) {
+                    }
+                }, 800);
+                return true;   // 表示由我们自己处理，不要杀进程
+            }
+
             public void onPageFinished(WebView view, String url) {
                 Log.i(TAG, "page finished: " + url);
                 pushFps(view);
@@ -489,6 +551,13 @@ public class PetService extends Service {
         try {
             web.clearCache(true);
             web.clearHistory();
+        } catch (Throwable ignored) {
+        }
+        // 部分机型 WebView 的 GPU 合成会坏（SharedImage 报错 → 空白），先软件渲染兜底
+        try {
+            if (getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("softRender", false)) {
+                web.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+            }
         } catch (Throwable ignored) {
         }
         web.loadUrl("file:///android_asset/pet.html");
@@ -522,7 +591,7 @@ public class PetService extends Service {
 
         // 服务不一定能收到 ComponentCallbacks 的配置变化，再挂一个广播兜底
         try {
-            android.content.BroadcastReceiver cfgRx = new android.content.BroadcastReceiver() {
+            cfgReceiver = new android.content.BroadcastReceiver() {
                 @Override
                 public void onReceive(Context c, android.content.Intent i) {
                     ui.postDelayed(PetService.this::onScreenChanged, 300);
@@ -531,9 +600,9 @@ public class PetService extends Service {
             android.content.IntentFilter f = new android.content.IntentFilter(
                     android.content.Intent.ACTION_CONFIGURATION_CHANGED);
             if (Build.VERSION.SDK_INT >= 33) {
-                registerReceiver(cfgRx, f, Context.RECEIVER_NOT_EXPORTED);
+                registerReceiver(cfgReceiver, f, Context.RECEIVER_NOT_EXPORTED);
             } else {
-                registerReceiver(cfgRx, f);
+                registerReceiver(cfgReceiver, f);
             }
         } catch (Throwable t) {
             Log.w(TAG, "config receiver failed: " + t);
@@ -764,21 +833,25 @@ public class PetService extends Service {
     private TextView bubbleText;
     private WindowManager.LayoutParams bubbleLp, menuLp;
     private final Runnable hideBubble = () -> {
-        if (bubbleLp != null && bubbleWin != null) {
-            bubbleLp.width = 1;
-            bubbleLp.height = 1;
-            bubbleLp.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-            try { wm.updateViewLayout(bubbleWin, bubbleLp); } catch (Throwable ignored) {}
-        }
+        removeOverlay(bubbleWin);
+        if (bubbleLp != null) { bubbleLp.width = 1; bubbleLp.height = 1; }
+        lastBx = lastBy = -9999;
     };
     private final Runnable hideMenu = () -> {
-        if (menuLp != null && menuWin != null) {
-            menuLp.width = 1;
-            menuLp.height = 1;
-            menuLp.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-            try { wm.updateViewLayout(menuWin, menuLp); } catch (Throwable ignored) {}
-        }
+        removeOverlay(menuWin);
+        if (menuLp != null) { menuLp.width = 1; menuLp.height = 1; }
+        lastMx = lastMy = -9999;
     };
+
+    /** 把某个小窗从系统里摘掉（不销毁视图，下次还能复用）。 */
+    private void removeOverlay(View v) {
+        if (v == null || wm == null) return;
+        try {
+            // 不管 isAttachedToWindow 报什么，都尝试摘一次，避免重复挂载
+            wm.removeViewImmediate(v);
+        } catch (Throwable ignored) {
+        }
+    }
 
     private WindowManager.LayoutParams overlayLp(int w, int h) {
         int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
@@ -806,8 +879,6 @@ public class PetService extends Service {
         bubbleText.setMaxLines(4);
         bubbleWin = bubbleText;
         bubbleLp = overlayLp(1, 1);
-        bubbleLp.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-        try { wm.addView(bubbleWin, bubbleLp); } catch (Throwable t) { bubbleWin = null; }
     }
 
     private void ensureMenuWin() {
@@ -840,8 +911,6 @@ public class PetService extends Service {
         }
         menuWin = box;
         menuLp = overlayLp(1, 1);
-        menuLp.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-        try { wm.addView(menuWin, menuLp); } catch (Throwable t) { menuWin = null; }
     }
 
     private void showHudBubble(String text, int ms) {
@@ -855,6 +924,14 @@ public class PetService extends Service {
         bubbleLp.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
         lastBx = lastBy = -9999;
+        if (!bubbleWin.isAttachedToWindow()) {
+            try {
+                wm.addView(bubbleWin, bubbleLp);
+                Log.i(TAG, "bubble attached");
+            } catch (Throwable t) {
+                Log.w(TAG, "bubble addView failed", t);
+            }
+        }
         placeBubble();
         startHudLoop();
         ui.removeCallbacks(hideBubble);
@@ -869,6 +946,14 @@ public class PetService extends Service {
         menuLp.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
         lastMx = lastMy = -9999;
+        if (!menuWin.isAttachedToWindow()) {
+            try {
+                wm.addView(menuWin, menuLp);
+                Log.i(TAG, "menu attached");
+            } catch (Throwable t) {
+                Log.w(TAG, "menu addView failed", t);
+            }
+        }
         placeMenu();
         startHudLoop();
         ui.removeCallbacks(hideMenu);
@@ -950,6 +1035,31 @@ public class PetService extends Service {
 
     private int lastBx = -9999, lastBy = -9999, lastMx = -9999, lastMy = -9999;
     private boolean hudLoopRunning;
+    private long idleSince;
+
+    /** 窗口被系统回收（后台被杀后复活）时，重建它们。 */
+    private void ensureHudAttached() {
+        if (Build.VERSION.SDK_INT < 19) return;
+        try {
+            if (bubbleWin != null && bubbleLp != null && bubbleLp.width > 1
+                    && !bubbleWin.isAttachedToWindow()) {
+                removeOverlay(bubbleWin);
+                bubbleWin = null;
+                bubbleLp = null;
+                lastBx = lastBy = -9999;
+                ensureBubbleWin();
+            }
+            if (menuWin != null && menuLp != null && menuLp.width > 1
+                    && !menuWin.isAttachedToWindow()) {
+                removeOverlay(menuWin);
+                menuWin = null;
+                menuLp = null;
+                lastMx = lastMy = -9999;
+                ensureMenuWin();
+            }
+        } catch (Throwable ignored) {
+        }
+    }
 
     /** 她移动时让气泡和面板跟着走（内部有变更检测）。 */
     private void followHud() {
@@ -969,12 +1079,19 @@ public class PetService extends Service {
             public void run() {
                 boolean visible = (bubbleLp != null && bubbleLp.width > 1)
                         || (menuLp != null && menuLp.width > 1);
-                if (!visible || !isRunning) {
+                if (!visible) {
                     hudLoopRunning = false;
                     return;
                 }
+                ensureHudAttached();
+                int bx = lastBx, by = lastBy, mx = lastMx, my = lastMy;
                 followHud();
-                ui.postDelayed(this, 8);
+                boolean moved = bx != lastBx || by != lastBy || mx != lastMx || my != lastMy;
+                if (moved) {
+                    idleSince = SystemClock.uptimeMillis();
+                }
+                boolean idle = SystemClock.uptimeMillis() - idleSince > 5000;
+                ui.postDelayed(this, idle ? 33 : 8);
             }
         }, 8);
     }
@@ -1076,14 +1193,15 @@ public class PetService extends Service {
             ui.postDelayed(step[0], 16);
         };
         inertiaRunning = true;
+        inertiaStep = step[0];
         ui.post(step[0]);
     }
 
     private void cancelInertia() {
-        if (inertiaRunning) {
-            ui.removeCallbacksAndMessages(null);
-            inertiaRunning = false;
+        if (inertiaStep != null) {
+            ui.removeCallbacks(inertiaStep);   // 只取消惯性帧，别把气泡/面板的隐藏计时一起清掉
         }
+        inertiaRunning = false;
     }
 
     /** 把窗口挪到绝对位置（CSS 像素语义同 movePet）。 */
@@ -1486,13 +1604,13 @@ public class PetService extends Service {
             if (!escalating && nowMs - lastShellTry > 4000) {
                 lastShellTry = nowMs;
                 escalating = true;
-                new Thread(() -> {
+                Bg.run(() -> {
                     try {
                         lastShellTop = ForegroundReader.topPackage(this);
                     } finally {
                         escalating = false;
                     }
-                }, "fg-escalate").start();
+                });
             }
             if (nowMs - lastShellTry < 15000) top = lastShellTop;
         }
@@ -1503,10 +1621,13 @@ public class PetService extends Service {
         lastForeground = top;
         boolean selfTop = top.equals(getPackageName());
         // 桌面或自己的 App 里都显示她（自己的 App 里方便预览她的状态）
-        boolean onHome = (!homePkg.isEmpty() && top.equals(homePkg))
+        // 任务栏/最近任务不是桌面：多任务界面时按“别的应用”处理，避免误判回桌面
+        boolean recents = top.contains("systemui") || top.contains("recents")
+                || top.contains("taskview") || top.contains("launcher.quickstep");
+        boolean onHome = !recents && ((!homePkg.isEmpty() && top.equals(homePkg))
                 || top.startsWith("com.android.launcher")
                 || top.contains("launcher")
-                || selfTop;
+                || selfTop);
         boolean screenOk = isScreenOnAndUnlocked();
         boolean edge = edgeMode();
         // 聊天窗打开时她必须继续显示：此时前台可能被识别成我们自己的包
@@ -1782,6 +1903,11 @@ public class PetService extends Service {
         }
 
         @JavascriptInterface
+        public void sayVoice(final String text) {
+            sayWithVoice(text);
+        }
+
+        @JavascriptInterface
         public void bubbleMenu() {
             ui.post(() -> showHudMenu());
         }
@@ -1816,7 +1942,15 @@ public class PetService extends Service {
 
     @Override
     public void onDestroy() {
+        try {
+            if (cfgReceiver != null) unregisterReceiver(cfgReceiver);
+        } catch (Throwable ignored) {
+        }
         hideChat();
+        removeOverlay(bubbleWin);
+        removeOverlay(menuWin);
+        bubbleWin = null;
+        menuWin = null;
         if (voiceIn != null) { voiceIn.stop(); voiceIn = null; }
         if (voiceTts != null) { voiceTts.release(); voiceTts = null; }
         if (INSTANCE == this) INSTANCE = null;

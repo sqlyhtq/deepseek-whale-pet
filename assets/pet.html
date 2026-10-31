@@ -214,7 +214,7 @@
     pokeCool = now;
     var r = POKE[(Math.random() * POKE.length) | 0];
     try { body.do(r[0]); } catch (e) {}
-    say(r[1], 2200);
+    try { PetHost.sayVoice(r[1]); } catch (e) { say(r[1], 2200); }
     setTimeout(function () {
       try { body.do('stand'); } catch (e) {}
     }, 1600);

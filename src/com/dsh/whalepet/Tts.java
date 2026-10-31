@@ -60,19 +60,19 @@ public class Tts {
             return;
         }
         if (voice.startsWith("dafeiyu")) {
-            final String key = prefs().getString("breezyKey", "").trim();
+            final String key = SecureStore.get(prefs(), "breezyKey").trim();
             if (key.isEmpty()) {
                 Log.w("WhalePet", "breeze key missing, fallback to edge");
-                new Thread(() -> synthEdge(text, "xiaoyi")).start();
+                Bg.run(() -> synthEdge(text, "xiaoyi"));
                 return;
             }
             if (System.currentTimeMillis() < breezeDownUntil) {
                 Log.w("WhalePet", "breeze circuit open, use edge");
-                new Thread(() -> synthEdge(text, "xiaoyi")).start();
+                Bg.run(() -> synthEdge(text, "xiaoyi"));
                 return;
             }
             final String vid = "dafeiyu-dreamy".equals(voice) ? BreezeTts.DREAMY : BreezeTts.CLEVER;
-            new Thread(() -> {
+            Bg.run(() -> {
                 try {
                     byte[] mp3 = BreezeTts.synth(text, key, vid);
                     Log.i("WhalePet", "breeze tts ok: " + voice + " bytes=" + mp3.length);
@@ -86,14 +86,14 @@ public class Tts {
                     Log.w("WhalePet", "breeze-tts failed, circuit open 10min: " + e);
                     synthEdge(text, "xiaoyi");
                 }
-            }).start();
+            });
             return;
         }
         synthEdge(text, voice);
     }
 
     private void synthEdge(final String text, final String voice) {
-        new Thread(() -> {
+        Bg.run(() -> {
             try {
                 byte[] mp3 = EdgeTts.synth(text, EdgeTts.voiceName(voice));
                 Log.i("WhalePet", "edge tts ok: " + voice + " bytes=" + mp3.length);
@@ -106,7 +106,7 @@ public class Tts {
                 Log.w("WhalePet", "edge-tts failed: " + e);
                 main.post(() -> speakSystem(text));
             }
-        }).start();
+        });
     }
 
     private void play(File f) {

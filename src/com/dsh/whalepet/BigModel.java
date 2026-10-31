@@ -43,7 +43,7 @@ public final class BigModel {
 
     /** 从本地 zip 安装（手机上下好的包，绕开 toybox unzip 的 offset 问题）。 */
     public static void installFromZip(final Context ctx, final File zip, final Progress cb) {
-        new Thread(() -> {
+        Bg.run(() -> {
             try {
                 File tmp = new File(ctx.getFilesDir(), "vosk-big-tmp");
                 deleteRec(tmp);
@@ -71,7 +71,7 @@ public final class BigModel {
                 Log.w(TAG, "installFromZip failed: " + t);
                 cb.onDone(false, String.valueOf(t.getMessage()));
             }
-        }, "big-model-zip").start();
+        });
     }
 
     private static void deleteRec(File f) {
@@ -86,7 +86,7 @@ public final class BigModel {
             cb.onDone(true, "大模型已就绪");
             return;
         }
-        new Thread(() -> {
+        Bg.run(() -> {
             File tmp = new File(ctx.getFilesDir(), "vosk-cn-big.zip");
             try {
                 download(URL, tmp, cb);
@@ -100,7 +100,7 @@ public final class BigModel {
                 Log.w(TAG, "big model failed: " + t);
                 cb.onDone(false, String.valueOf(t.getMessage()));
             }
-        }, "big-model").start();
+        });
     }
 
     private static void download(String urlStr, File out, Progress cb) throws Exception {

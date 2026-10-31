@@ -275,6 +275,39 @@ public class MainActivity extends Activity {
             }
         });
 
+        android.widget.Switch memSwitch = new android.widget.Switch(this);
+        memSwitch.setText("长期记忆（把关于你的事实记下来）");
+        memSwitch.setTextSize(13);
+        memSwitch.setChecked(getSharedPreferences("pet", MODE_PRIVATE)
+                .getBoolean("longMemory", true));
+        memSwitch.setOnCheckedChangeListener((btn, checked) ->
+                getSharedPreferences("pet", MODE_PRIVATE).edit()
+                        .putBoolean("longMemory", checked).apply());
+        LinearLayout.LayoutParams memlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        memlp.topMargin = dp(12);
+        root.addView(memSwitch, memlp);
+
+        Button memBtn = new Button(this);
+        memBtn.setText("查看 / 清空记忆");
+        memBtn.setAllCaps(false);
+        root.addView(memBtn);
+        memBtn.setOnClickListener(v -> {
+            java.util.List<MemoryStore.Fact> facts = MemoryStore.load(this);
+            StringBuilder sb = new StringBuilder();
+            if (facts.isEmpty()) sb.append("还没有记住什么。");
+            else for (MemoryStore.Fact f : facts) sb.append("· ").append(f.text).append('\n');
+            new android.app.AlertDialog.Builder(this)
+                    .setTitle("她的记忆（" + facts.size() + " 条）")
+                    .setMessage(sb.toString())
+                    .setPositiveButton("关闭", null)
+                    .setNegativeButton("清空", (d, w) -> {
+                        MemoryStore.clear(this);
+                        android.widget.Toast.makeText(this, "已清空", android.widget.Toast.LENGTH_SHORT).show();
+                    })
+                    .show();
+        });
+
         android.widget.Switch dockHomeSwitch = new android.widget.Switch(this);
         dockHomeSwitch.setText("桌面上贴边隐藏（默认关：允许她卡在屏幕边）");
         dockHomeSwitch.setTextSize(13);
@@ -387,7 +420,7 @@ public class MainActivity extends Activity {
         breezyKey.setHint("xi-api-key（breezeblue.ai 开发者页申请）");
         breezyKey.setTextSize(14);
         breezyKey.setSingleLine(true);
-        breezyKey.setText(getSharedPreferences("pet", MODE_PRIVATE).getString("breezyKey", ""));
+        breezyKey.setText(SecureStore.get(getSharedPreferences("pet", MODE_PRIVATE), "breezyKey"));
         root.addView(breezyKey);
 
         Button shizuku = new Button(this);
@@ -427,13 +460,14 @@ public class MainActivity extends Activity {
         saplp.topMargin = dp(10);
         root.addView(save, saplp);
         save.setOnClickListener(v -> {
-            getSharedPreferences("pet", MODE_PRIVATE).edit()
+            android.content.SharedPreferences sp = getSharedPreferences("pet", MODE_PRIVATE);
+            sp.edit()
                     .putString("baseUrl", baseUrl.getText().toString().trim())
-                    .putString("apiKey", apiKey.getText().toString().trim())
                     .putString("model", model.getText().toString().trim())
                     .putString("ttsVoice", voiceKeys[Math.max(0, voiceSpin.getSelectedItemPosition())])
-                    .putString("breezyKey", breezyKey.getText().toString().trim())
                     .apply();
+            SecureStore.put(sp, "apiKey", apiKey.getText().toString().trim());
+            SecureStore.put(sp, "breezyKey", breezyKey.getText().toString().trim());
             Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show();
         });
 
@@ -501,7 +535,7 @@ public class MainActivity extends Activity {
 
     private void loadSettings() {
         baseUrl.setText(getSharedPreferences("pet", MODE_PRIVATE).getString("baseUrl", "https://api.deepseek.com"));
-        apiKey.setText(getSharedPreferences("pet", MODE_PRIVATE).getString("apiKey", ""));
+        apiKey.setText(SecureStore.get(getSharedPreferences("pet", MODE_PRIVATE), "apiKey"));
         model.setText(getSharedPreferences("pet", MODE_PRIVATE).getString("model", "deepseek-chat"));
     }
 

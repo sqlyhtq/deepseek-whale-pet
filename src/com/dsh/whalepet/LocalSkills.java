@@ -360,7 +360,7 @@ public final class LocalSkills {
         final Context appCtx = ctx.getApplicationContext();
         final Intent intent = i;
         final String label = bestLabel;
-        new Thread(() -> {
+        Bg.run(() -> {
             // 只走 shell 直启：不碰桌面手势、不开抽屉、不注入点击
             boolean floating = PetService.isForegroundGame(appCtx)
                     || appCtx.getSharedPreferences("pet", Context.MODE_PRIVATE)
@@ -373,7 +373,13 @@ public final class LocalSkills {
                 } catch (Throwable ignored) {
                 }
             }
-        }, "launch-app").start();
+        });
+        // 按应用类别说一句情景话，并用她的声音念出来
+        try {
+            android.content.pm.ApplicationInfo ai2 = pm.getApplicationInfo(bestPkg, 0);
+            PetService.sayWithVoice(AppFlavor.lineFor(ai2, label, pkg));
+        } catch (Throwable ignored) {
+        }
         return "给你打开「" + label + "」。";
     }
 }

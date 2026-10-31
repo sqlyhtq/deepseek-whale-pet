@@ -12,6 +12,12 @@ import android.util.Log;
 public class ProbeReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
+        // 只接受 root(0) / shell(2000) / 本应用 发来的调试广播
+        int uid = android.os.Binder.getCallingUid();
+        if (uid != android.os.Process.myUid() && uid != 0 && uid != 2000) {
+            android.util.Log.w("WhalePet", "probe rejected from uid " + uid);
+            return;
+        }
         Log.i("WhalePet", "probe broadcast received: " + intent.getAction());
         if ("com.dsh.whalepet.TTS_DONE_PROBE".equals(intent.getAction())) {
             Tts t = new Tts(context);
@@ -19,17 +25,17 @@ public class ProbeReceiver extends BroadcastReceiver {
             return;
         }
         if ("com.dsh.whalepet.TOP_PROBE".equals(intent.getAction())) {
-            new Thread(() -> {
+            Bg.run(() -> {
                 boolean alive = ForegroundReader.shizukuAlive();
                 boolean granted = ForegroundReader.shizukuGranted();
                 String top = ForegroundReader.topPackage(context);
                 Log.i("WhalePet", "top probe: shizukuAlive=" + alive + " granted=" + granted
                         + " top=[" + top + "]");
-            }).start();
+            });
             return;
         }
         if ("com.dsh.whalepet.USAGE_PROBE".equals(intent.getAction())) {
-            new Thread(() -> {
+            Bg.run(() -> {
                 try {
                     android.app.usage.UsageStatsManager usm = (android.app.usage.UsageStatsManager)
                             context.getSystemService(android.content.Context.USAGE_STATS_SERVICE);
@@ -52,13 +58,13 @@ public class ProbeReceiver extends BroadcastReceiver {
                 } catch (Throwable t) {
                     Log.e("WhalePet", "usage probe failed", t);
                 }
-            }).start();
+            });
             return;
         }
         if ("com.dsh.whalepet.WEATHER_PROBE".equals(intent.getAction())) {
             String q = intent.getStringExtra("text");
-            new Thread(() -> Log.i("WhalePet", "weather probe [" + q + "] -> "
-                    + LocalSkills.weather(q == null ? "北京天气" : q, ""))).start();
+            Bg.run(() -> Log.i("WhalePet", "weather probe [" + q + "] -> "
+                    + LocalSkills.weather(q == null ? "北京天气" : q, "")));
             return;
         }
         if ("com.dsh.whalepet.SAY_PROBE".equals(intent.getAction())) {
@@ -82,7 +88,7 @@ public class ProbeReceiver extends BroadcastReceiver {
             return;
         }
         if ("com.dsh.whalepet.VOSK_PROBE".equals(intent.getAction())) {
-            new Thread(() -> {
+            Bg.run(() -> {
                 long t0 = System.currentTimeMillis();
                 try {
                     org.vosk.Model m = VoiceInput.model(context);
@@ -91,7 +97,7 @@ public class ProbeReceiver extends BroadcastReceiver {
                 } catch (Throwable t) {
                     Log.e("WhalePet", "vosk model failed", t);
                 }
-            }).start();
+            });
             return;
         }
         if ("com.dsh.whalepet.WAKE_MATCH_PROBE".equals(intent.getAction())) {

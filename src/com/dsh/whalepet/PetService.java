@@ -56,6 +56,24 @@ public class PetService extends Service {
     public static boolean isRunning = false;
     static PetService INSTANCE;
 
+    /** 启停状态回调（主线程），供设置页刷新按钮，避免按钮停在旧文案。 */
+    public interface RunningListener {
+        void onRunningChanged(boolean running);
+    }
+
+    private static volatile RunningListener runningListener;
+    private static final android.os.Handler MAIN = new android.os.Handler(android.os.Looper.getMainLooper());
+
+    public static void setRunningListener(RunningListener l) {
+        runningListener = l;
+    }
+
+    private static void publishRunning(final boolean running) {
+        final RunningListener l = runningListener;
+        if (l == null) return;
+        MAIN.post(() -> l.onRunningChanged(running));
+    }
+
     /** 打开悬浮聊天窗（不切前台）。 */
     public static void openChatWindow(final boolean voice) {
         PetService svc = INSTANCE;
@@ -622,6 +640,7 @@ public class PetService extends Service {
         try {
             wm.addView(root, lp);
             isRunning = true;
+            publishRunning(true);
             INSTANCE = this;
             homePkg = resolveHomePackage();
             setEnabled(this, true);
@@ -1960,6 +1979,7 @@ public class PetService extends Service {
             wake = null;
         }
         isRunning = false;
+        publishRunning(false);
         if (web != null) {
             if (wm != null && root != null) {
                 try {

@@ -339,13 +339,10 @@ public class PetService extends Service {
         return CURRENT_ICON == null ? "" : CURRENT_ICON;
     }
 
-    /** 如果 files 目录里有 big.zip 且大模型还没装，就在后台装一次。 */
+    /** 如果 files 目录里有 big.zip 或 assets 里预置了大模型包，就在后台装一次。 */
     private void autoInstallBigModel() {
         if (BigModel.isReady(this)) return;
-        final java.io.File zip = new java.io.File(getFilesDir(), "big.zip");
-        if (!zip.exists()) return;
-        Log.i(TAG, "auto install big model from " + zip);
-        BigModel.installFromZip(this, zip, new BigModel.Progress() {
+        BigModel.Progress progress = new BigModel.Progress() {
             @Override
             public void onProgress(int percent, long done, long total) {
             }
@@ -354,7 +351,14 @@ public class PetService extends Service {
             public void onDone(boolean ok, String message) {
                 Log.i(TAG, "auto install big model done=" + ok + " " + message);
             }
-        });
+        };
+        final java.io.File zip = new java.io.File(getFilesDir(), "big.zip");
+        if (zip.exists()) {
+            Log.i(TAG, "auto install big model from " + zip);
+            BigModel.installFromZip(this, zip, progress);
+            return;
+        }
+        BigModel.installFromAssetsIfPresent(this, progress);
     }
 
     /** 用 root/Shizuku 把无障碍服务打开（不会顶掉用户已有的其它服务）。 */

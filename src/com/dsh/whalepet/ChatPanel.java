@@ -398,7 +398,7 @@ public class ChatPanel extends android.widget.FrameLayout {
         handsFree = true;
         listening = true;
         micBtn.setAlpha(0.55f);
-        status.setText("正在加载离线语音模型…");
+        status.setText(VoiceInput.isModelLoaded() ? "正在听…" : "正在加载离线语音模型…");
         android.util.Log.i("WhalePet", "chat voice start");
         voice.start(ctx, new VoiceInput.Listener() {
             @Override

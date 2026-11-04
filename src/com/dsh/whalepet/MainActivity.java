@@ -27,6 +27,7 @@ public class MainActivity extends Activity {
     private TextView status;
     private Button toggle;
     private EditText baseUrl, apiKey, model, breezyKey;
+    private TextView asrNow;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -221,22 +222,36 @@ public class MainActivity extends Activity {
         root.addView(asrLabel, allp);
 
         final android.widget.Spinner asrSpinner = new android.widget.Spinner(this);
-        final String[] asrNames = {"大模型（更准，占 3GB 内存）", "小模型（省内存，准确率低）"};
+        final boolean bigReady = BigModel.isReady(this);
+        if ("big".equals(getSharedPreferences("pet", MODE_PRIVATE).getString("asrModel", "big"))
+                && !bigReady) {
+            getSharedPreferences("pet", MODE_PRIVATE).edit().putString("asrModel", "small").apply();
+        }
+        final String[] asrNames = {
+                bigReady ? "大模型（更准，占 3GB 内存）" : "大模型（未下载，先点下面下载）",
+                "小模型（省内存，准确率低）"};
         android.widget.ArrayAdapter<String> asrAdapter = new android.widget.ArrayAdapter<>(this,
                 android.R.layout.simple_spinner_dropdown_item, asrNames);
         asrSpinner.setAdapter(asrAdapter);
-        boolean isBig = getSharedPreferences("pet", MODE_PRIVATE)
-                .getString("asrModel", "big").equals("big");
+        boolean isBig = bigReady && getSharedPreferences("pet", MODE_PRIVATE)
+                .getString("asrModel", "small").equals("big");
         asrSpinner.setSelection(isBig ? 0 : 1);
         asrSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(android.widget.AdapterView<?> parent, android.view.View view,
                                        int position, long id) {
+                if (position == 0 && !BigModel.isReady(MainActivity.this)) {
+                    Toast.makeText(MainActivity.this,
+                            "大模型还没下载，先点下面的「下载大模型」", Toast.LENGTH_SHORT).show();
+                    asrSpinner.setSelection(1, false);
+                    return;
+                }
                 getSharedPreferences("pet", MODE_PRIVATE).edit()
                         .putString("asrModel", position == 0 ? "big" : "small").apply();
                 VoiceInput.reset();
                 PetService svc = PetService.INSTANCE;
                 if (svc != null) svc.restartWakeForModelChange();
+                refreshAsrNow();
             }
 
             @Override
@@ -244,6 +259,14 @@ public class MainActivity extends Activity {
             }
         });
         root.addView(asrSpinner);
+
+        asrNow = new TextView(this);
+        asrNow.setTextSize(12);
+        asrNow.setTextColor(Color.parseColor("#7C8FB5"));
+        LinearLayout.LayoutParams anlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        anlp.topMargin = dp(4);
+        root.addView(asrNow, anlp);
 
         TextView il = new TextView(this);
         int inertiaNow = getSharedPreferences("pet", MODE_PRIVATE).getInt("inertia", 60);
@@ -374,8 +397,20 @@ public class MainActivity extends Activity {
                     runOnUiThread(() -> {
                         bigModel.setEnabled(true);
                         bigModel.setText(ok ? "大模型：已就绪 ✓" : "下载失败，点我重试");
+                        if (ok) {
+                            // 一键应用：切到大模型，并让识别链路重载（否则内存里还是旧模型）
+                            getSharedPreferences("pet", MODE_PRIVATE).edit()
+                                    .putString("asrModel", "big").apply();
+                            asrNames[0] = "大模型（更准，占 3GB 内存）";
+                            asrAdapter.notifyDataSetChanged();
+                            asrSpinner.setSelection(0, false);
+                            VoiceInput.reset();
+                            PetService svc = PetService.INSTANCE;
+                            if (svc != null) svc.restartWakeForModelChange();
+                            refreshAsrNow();
+                        }
                         android.widget.Toast.makeText(MainActivity.this,
-                                ok ? "大模型准备完成" : ("失败：" + message),
+                                ok ? "大模型已应用，下次说话就用它" : ("失败：" + message),
                                 android.widget.Toast.LENGTH_LONG).show();
                     });
                 }
@@ -492,7 +527,11 @@ public class MainActivity extends Activity {
 
         setContentView(scroll);
         loadSettings();
+        // 能提前做的先做：解压并加载内置语音模型，别等第一次说话
+        VoiceInput.prepareAssets(this);
+        VoiceInput.warmUp(this);
         refresh();
+        refreshAsrNow();
     }
 
     private EditText field(LinearLayout parent, String label, String def, boolean secret) {
@@ -527,6 +566,7 @@ public class MainActivity extends Activity {
         sb.append(key.trim().isEmpty() ? "✗ 模型 API Key 未填" : "✓ 模型 API Key 已填（" + key.length() + " 位）").append('\n');
         String bz = getSharedPreferences("pet", MODE_PRIVATE).getString("breezyKey", "");
         sb.append(bz.trim().isEmpty() ? "！BreezeBlue Key 未填（大肥鱼音色会回落晓伊）" : "✓ BreezeBlue Key 已填").append('\n');
+        sb.append("识别模型：").append(VoiceInput.activeModelLabel(this)).append('\n');
         sb.append("语音引擎：").append(getSharedPreferences("pet", MODE_PRIVATE).getString("ttsVoice", "dafeiyu-clever")).append('\n');
         sb.append("唤醒词：").append(getSharedPreferences("pet", MODE_PRIVATE).getBoolean("wake", false) ? "开" : "关").append('\n');
         sb.append("模型：").append(getSharedPreferences("pet", MODE_PRIVATE).getString("model", "deepseek-chat"));
@@ -546,6 +586,7 @@ public class MainActivity extends Activity {
             startPet();
         }
         refresh();
+        refreshAsrNow();
         Log.i("WhalePet", "diagnostics:\n" + diagnostics());
     }
 
@@ -560,6 +601,10 @@ public class MainActivity extends Activity {
         Intent i = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:" + getPackageName()));
         startActivity(i);
+    }
+
+    private void refreshAsrNow() {
+        if (asrNow != null) asrNow.setText("当前生效：" + VoiceInput.activeModelLabel(this));
     }
 
     private void refresh() {

@@ -442,6 +442,9 @@ public class PetService extends Service {
         super.onCreate();
         createChannel();
         autoInstallBigModel();
+        // 提前解压并加载内置语音模型，第一次唤醒/语音输入就不用等
+        VoiceInput.prepareAssets(this);
+        VoiceInput.warmUp(this);
         try {
             if (Build.VERSION.SDK_INT >= 30) {
                 // 声明 microphone 类型，否则后台录音会被系统静音（收到全 0 数据）

@@ -398,13 +398,42 @@ public class MainActivity extends Activity {
         });
 
         final Switch wakeSwitch = new Switch(this);
-        wakeSwitch.setText("语音唤醒「小鲸小鲸」（只在桌面待机时听）");
+        wakeSwitch.setText("语音唤醒（唤醒词见下方，只在桌面待机时听）");
         wakeSwitch.setTextSize(13);
         wakeSwitch.setChecked(getSharedPreferences("pet", MODE_PRIVATE).getBoolean("wake", false));
         LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         wlp.topMargin = dp(12);
         root.addView(wakeSwitch, wlp);
+        // 自定义唤醒词：第一个是主词，其余用 | 或、分隔作为同音别名
+        final EditText wakeWord = new EditText(this);
+        wakeWord.setHint("唤醒词，如：大肥鱼|打肥鱼|大非鱼");
+        wakeWord.setTextSize(14);
+        wakeWord.setSingleLine(true);
+        wakeWord.setText(getSharedPreferences("pet", MODE_PRIVATE)
+                .getString("wakeWord", "大肥鱼"));
+        LinearLayout.LayoutParams wwlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        wwlp.topMargin = dp(6);
+        root.addView(wakeWord, wwlp);
+
+        Button saveWake = new Button(this);
+        saveWake.setText("保存唤醒词");
+        saveWake.setAllCaps(false);
+        LinearLayout.LayoutParams swlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        swlp.topMargin = dp(6);
+        root.addView(saveWake, swlp);
+        saveWake.setOnClickListener(v -> {
+            String w = wakeWord.getText().toString().trim();
+            if (w.isEmpty()) w = "大肥鱼";
+            getSharedPreferences("pet", MODE_PRIVATE).edit().putString("wakeWord", w).apply();
+            WakeWord.loadFromPrefs(this);
+            PetService svc = PetService.INSTANCE;
+            if (svc != null) svc.restartWakeForModelChange();
+            Toast.makeText(this, "唤醒词已保存：" + WakeWord.currentWord(), Toast.LENGTH_SHORT).show();
+        });
+
         wakeSwitch.setOnCheckedChangeListener((b, checked) ->
                 getSharedPreferences("pet", MODE_PRIVATE).edit().putBoolean("wake", checked).apply());
 

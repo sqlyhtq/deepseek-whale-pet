@@ -70,7 +70,7 @@ public class ProbeReceiver extends BroadcastReceiver {
         if ("com.dsh.whalepet.SAY_PROBE".equals(intent.getAction())) {
             String t = intent.getStringExtra("text");
             Tts tts = new Tts(context);
-            tts.speak(t == null ? "小鲸小鲸" : t);
+            tts.speak(t == null ? "大肥鱼" : t);
             return;
         }
         if ("com.dsh.whalepet.BUBBLE_PROBE".equals(intent.getAction())) {
@@ -102,9 +102,9 @@ public class ProbeReceiver extends BroadcastReceiver {
         }
         if ("com.dsh.whalepet.WAKE_MATCH_PROBE".equals(intent.getAction())) {
             String[] cases = {
-                    "小鲸小鲸", "小鲸小鲸，帮我看下时间", "嗯…小鲸小鲸", "鲸鱼娘你在吗",
-                    "我说那个小鲸小鲸到底在不在", "今天吃了吗",
-                    "小经小经帮我看看几点了", "小静小静"
+                    "大肥鱼", "大肥鱼，帮我看下时间", "嗯…大肥鱼", "大肥鱼你在吗",
+                    "我说那个大肥鱼到底在不在", "今天吃了吗",
+                    "打肥鱼帮我看看几点了", "大非鱼"
             };
             for (String c : cases) {
                 Log.i("WhalePet", "match [" + c + "] -> " + WakeWord.matchesKeyword(c)

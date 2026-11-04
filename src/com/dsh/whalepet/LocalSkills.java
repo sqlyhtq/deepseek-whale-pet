@@ -162,7 +162,7 @@ public final class LocalSkills {
             boolean on = q.contains("开") || q.contains("启用");
             ctx.getSharedPreferences("pet", Context.MODE_PRIVATE).edit()
                     .putBoolean("wake", on).apply();
-            return on ? "好，我在桌面上听着「小鲸小鲸」。" : "行，先不听麦了。";
+            return on ? "好，我在桌面上听着「大肥鱼」。" : "行，先不听麦了。";
         }
         if (q.startsWith("打开设置") || q.contains("去设置")) {
             try {

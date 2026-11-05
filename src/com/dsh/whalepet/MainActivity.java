@@ -275,6 +275,16 @@ public class MainActivity extends Activity {
             }
         });
 
+        Button wakeDiagBtn = new Button(this);
+        wakeDiagBtn.setText("唤醒诊断");
+        wakeDiagBtn.setAllCaps(false);
+        root.addView(wakeDiagBtn);
+        wakeDiagBtn.setOnClickListener(v -> new android.app.AlertDialog.Builder(this)
+                .setTitle("唤醒诊断")
+                .setMessage(wakeDiag())
+                .setPositiveButton("关闭", null)
+                .show());
+
         final EditText wakeField = field(root, "唤醒词（默认「小鲸小鲸」）",
                 getSharedPreferences("pet", MODE_PRIVATE).getString("wakeWord", "小鲸小鲸"), false);
         wakeField.setOnFocusChangeListener((v, has) -> {
@@ -529,6 +539,25 @@ public class MainActivity extends Activity {
         if (secret) e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         parent.addView(e);
         return e;
+    }
+
+    private String wakeDiag() {
+        StringBuilder sb = new StringBuilder();
+        boolean on = getSharedPreferences("pet", MODE_PRIVATE).getBoolean("wake", false);
+        sb.append("唤醒开关：").append(on ? "开" : "关").append('\n');
+        sb.append("唤醒词：").append(WakeWord.currentWord(this)).append('\n');
+        String heard = WakeWord.diagLastHeard;
+        long at = WakeWord.diagLastHeardAt;
+        sb.append("最近听到：").append(heard == null || heard.isEmpty() ? "（还没听到过）" : heard).append('\n');
+        sb.append("听到时间：").append(at == 0 ? "—" : new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date(at))).append('\n');
+        long hit = WakeWord.diagLastHitAt;
+        sb.append("最近唤醒：").append(hit == 0 ? "—" : new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.CHINA).format(new java.util.Date(hit))).append('\n');
+        sb.append("录音权限：").append(checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED ? "有" : "没有").append('\n');
+        sb.append("唤醒引擎：").append(PetService.wakeRunning() ? "运行中" : "未运行").append('\n');
+        sb.append("识别模型：").append(getSharedPreferences("pet", MODE_PRIVATE)
+                .getString("asrModel", "big")).append(BigModel.isReady(this) ? "（已下载）" : "（未下载）");
+        return sb.toString();
     }
 
     private String diagnostics() {

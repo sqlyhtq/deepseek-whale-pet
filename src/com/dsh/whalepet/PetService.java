@@ -306,8 +306,9 @@ public class PetService extends Service {
             web.evaluateJavascript("window.petSetRoam && window.petSetRoam(false)", null);
             web.evaluateJavascript("window.petSetDocked && window.petSetDocked(" + side + ")", null);
         }
-        // 贴边躲起来时顺手把聊天框收掉，别挡游戏
+        // 贴边躲起来时顺手把聊天框、面板、气泡一起收掉，别挡游戏
         if (chat != null) hideChat();
+        dismissHud();
         Log.i(TAG, "dock to " + (side < 0 ? "left" : "right") + " x=" + lp.x);
     }
 
@@ -334,6 +335,12 @@ public class PetService extends Service {
     }
     private long lastPartialAt = 0;
     private String announcedIcon = "";
+
+    /** 诊断用：唤醒引擎是否在跑。 */
+    public static boolean wakeRunning() {
+        PetService svc = INSTANCE;
+        return svc != null && svc.wake != null && svc.wake.isRunning();
+    }
 
     public static String currentIcon() {
         return CURRENT_ICON == null ? "" : CURRENT_ICON;
@@ -845,6 +852,16 @@ public class PetService extends Service {
         if (menuLp != null) { menuLp.width = 1; menuLp.height = 1; }
         lastMx = lastMy = -9999;
     };
+
+    /** 立刻收起面板和气泡（贴边/隐藏时调用，避免残留在屏幕上）。 */
+    private void dismissHud() {
+        ui.removeCallbacks(hideMenu);
+        ui.removeCallbacks(hideBubble);
+        hideMenu.run();
+        hideBubble.run();
+        // 页面上的菜单按钮也一并收起，避免她拉出来时又带着面板
+        if (web != null) web.evaluateJavascript("window.petShowMenu && window.petShowMenu(false)", null);
+    }
 
     /** 把某个小窗从系统里摘掉（不销毁视图，下次还能复用）。 */
     private void removeOverlay(View v) {
@@ -1712,6 +1729,7 @@ public class PetService extends Service {
             } else {
                 lastX = lp.x;
                 lastY = lp.y;
+                dismissHud();
                 lp.width = Math.max(1, dp(1));
                 lp.height = Math.max(1, dp(1));
                 lp.flags = fullFlags | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
@@ -1912,7 +1930,11 @@ public class PetService extends Service {
 
         @JavascriptInterface
         public void bubbleMenu() {
-            ui.post(() -> showHudMenu());
+            ui.post(() -> {
+                // 贴边躲起来的时候不弹面板（松手瞬间页面还会补发一次点击事件）
+                if (docked) return;
+                showHudMenu();
+            });
         }
 
         @JavascriptInterface

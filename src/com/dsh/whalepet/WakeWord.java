@@ -41,6 +41,11 @@ public class WakeWord {
     private long lastHit;
     private String lastHeard = "";
 
+    // 诊断用：最近听到的识别文本和时间，设置页可看
+    public static volatile String diagLastHeard = "";
+    public static volatile long diagLastHeardAt = 0;
+    public static volatile long diagLastHitAt = 0;
+
     public WakeWord(Context ctx) {
         this.ctx = ctx.getApplicationContext();
     }
@@ -59,6 +64,8 @@ public class WakeWord {
             public void onPartial(String text) {
                 if (text != null && text.length() >= 2 && !text.equals(lastHeard)) {
                     lastHeard = text;
+                    diagLastHeard = text;
+                    diagLastHeardAt = System.currentTimeMillis();
                     Log.i(TAG, "wake heard: [" + text + "]");
                 }
                 check(text);
@@ -158,6 +165,7 @@ public class WakeWord {
         if (!matchesKeyword(ctx, text)) return;
         Log.i(TAG, "wake hit: " + text);
         lastHit = System.currentTimeMillis();
+        diagLastHitAt = lastHit;
         running = false;
         Listener l = listener;
         stop();

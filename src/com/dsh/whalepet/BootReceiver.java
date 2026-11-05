@@ -14,7 +14,15 @@ public class BootReceiver extends BroadcastReceiver {
         try {
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(i);
             else context.startService(i);
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            // Android 14/15 对麦克风型前台服务有额外限制，失败时不要静默吞掉
+            android.util.Log.w("WhalePet", "boot start failed: " + t);
+            try {
+                context.startService(i);
+                android.util.Log.i("WhalePet", "boot start retried with startService");
+            } catch (Throwable t2) {
+                android.util.Log.e("WhalePet", "boot start retry failed (need manual launch): " + t2);
+            }
         }
     }
 }

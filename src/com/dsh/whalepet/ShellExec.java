@@ -89,8 +89,17 @@ public final class ShellExec {
         });
         reader.setDaemon(true);
         reader.start();
+        // stderr 也必须排空，否则大量输出会把进程堵住
+        Thread err = new Thread(() -> {
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(p.getErrorStream()))) {
+                while (br.readLine() != null) { /* 丢弃 */ }
+            } catch (Throwable ignored) {
+            }
+        });
+        err.setDaemon(true);
+        err.start();
         try {
-            if (!p.waitFor(2000, TimeUnit.MILLISECONDS)) {
+            if (!p.waitFor(4000, TimeUnit.MILLISECONDS)) {
                 p.destroyForcibly();
                 reader.join(300);
                 return sb.toString();

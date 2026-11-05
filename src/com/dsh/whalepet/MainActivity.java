@@ -275,6 +275,25 @@ public class MainActivity extends Activity {
             }
         });
 
+        android.widget.Switch a11ySwitch = new android.widget.Switch(this);
+        a11ySwitch.setText("自动开启无障碍（看桌面图标用，默认关）");
+        a11ySwitch.setTextSize(13);
+        a11ySwitch.setChecked(getSharedPreferences("pet", MODE_PRIVATE).getBoolean("autoA11y", false));
+        a11ySwitch.setOnCheckedChangeListener((btn, checked) ->
+                getSharedPreferences("pet", MODE_PRIVATE).edit()
+                        .putBoolean("autoA11y", checked).apply());
+        LinearLayout.LayoutParams a11ylp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        a11ylp.topMargin = dp(12);
+        root.addView(a11ySwitch, a11ylp);
+
+        final EditText memUrl = field(root, "记忆服务地址（留空=不用）",
+                getSharedPreferences("pet", MODE_PRIVATE).getString("memServerUrl", ""), false);
+        final EditText memTokenField = field(root, "记忆服务令牌",
+                SecureStore.get(getSharedPreferences("pet", MODE_PRIVATE), "memToken"), true);
+        final EditText memScopeField = field(root, "记忆分组（默认 pet）",
+                getSharedPreferences("pet", MODE_PRIVATE).getString("memScope", "pet"), false);
+
         Button wakeDiagBtn = new Button(this);
         wakeDiagBtn.setText("唤醒诊断");
         wakeDiagBtn.setAllCaps(false);
@@ -485,6 +504,10 @@ public class MainActivity extends Activity {
                     .apply();
             SecureStore.put(sp, "apiKey", apiKey.getText().toString().trim());
             SecureStore.put(sp, "breezyKey", breezyKey.getText().toString().trim());
+            sp.edit().putString("memServerUrl", memUrl.getText().toString().trim())
+                    .putString("memScope", memScopeField.getText().toString().trim())
+                    .apply();
+            SecureStore.put(sp, "memToken", memTokenField.getText().toString().trim());
             Toast.makeText(this, "已保存", Toast.LENGTH_SHORT).show();
         });
 

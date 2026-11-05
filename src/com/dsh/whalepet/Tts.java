@@ -23,6 +23,7 @@ public class Tts {
     private MediaPlayer player;
     private TextToSpeech sys;
     private File lastFile;
+    private String lastText = "";
     private static long breezeDownUntil;
     private static long lastSpeakAt;   // 熔断：Breeze 失败后一段时间直接走 Edge
     private Runnable pendingDone;
@@ -127,7 +128,7 @@ public class Tts {
             lastFile = f;
         } catch (Exception e) {
             Log.w("WhalePet", "play failed: " + e);
-            speakSystem("");
+            speakSystem(lastText);
         }
     }
 

@@ -51,7 +51,7 @@ public class ChatEngine {
         loadHistory();
     }
 
-    public void ask(final String text, final Callback cb) {
+    public synchronized void ask(final String text, final Callback cb) {
         main.post(() -> cb.onUser(text));
 
         if (LocalSkills.wantsWeather(text)) {
@@ -80,11 +80,14 @@ public class ChatEngine {
             return;
         }
 
+        memBlock = MemClient.recall(ctx, text);
         history.add(msgJson("user", text));
         Bg.run(() -> {
             try {
                 String reply = callApi(base, key, model);
                 finishTurn(null, reply, cb);
+                MemClient.add(ctx, "user", text);
+                MemClient.add(ctx, "assistant", reply);
                 maybeExtractMemory(base, key, model);
             } catch (Exception e) {
                 final String err = e.getMessage() == null ? e.toString() : e.getMessage();
@@ -94,6 +97,7 @@ public class ChatEngine {
         });
     }
 
+    private volatile String memBlock = "";
     private int lastExtractSize = 0;
 
     /** 每 10 轮归纳一次“关于用户的事实”，存本地。 */
@@ -214,7 +218,7 @@ public class ChatEngine {
             JSONObject sys = new JSONObject();
             sys.put("role", "system");
             String extra = PetService.currentIcon();
-            sys.put("content", SYSTEM_PROMPT + MemoryStore.promptBlock(ctx)
+            sys.put("content", SYSTEM_PROMPT + MemoryStore.promptBlock(ctx) + memBlock
                     + (extra == null || extra.isEmpty() ? ""
                        : "（她此刻正站在桌面图标「" + extra + "」旁边，可以自然地顺带提一句。）"));
             arr.put(sys);

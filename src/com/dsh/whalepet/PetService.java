@@ -366,6 +366,8 @@ public class PetService extends Service {
 
     /** 用 root/Shizuku 把无障碍服务打开（不会顶掉用户已有的其它服务）。 */
     private void ensureA11y() {
+        // 默认不自动开无障碍：需要「看桌面图标」的用户请在设置里手动打开
+        if (!getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("autoA11y", false)) return;
         final String me = getPackageName() + "/.PetA11yService";
         Bg.run(() -> {
             String cur = ShellExec.sh("settings get secure enabled_accessibility_services");
@@ -549,7 +551,7 @@ public class PetService extends Service {
             }
 
             private void pushFps(WebView view) {
-                int f = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("petFps", 120);
+                int f = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("petFps", 60);
                 try {
                     view.evaluateJavascript("window.petSetFps && window.petSetFps(" + f + ")", null);
                     int sec = getSharedPreferences(PREFS, MODE_PRIVATE).getInt("bubbleSeconds", 7);

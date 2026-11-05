@@ -31,7 +31,7 @@
     <application
         android:label="鲸鱼娘桌宠"
         android:icon="@mipmap/ic_launcher"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:supportsRtl="true"
         android:usesCleartextTraffic="false"
         android:hardwareAccelerated="true">

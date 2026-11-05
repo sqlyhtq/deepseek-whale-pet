@@ -123,9 +123,11 @@ public final class ForegroundReader {
     /** 输出形如：mCurrentFocus=Window{... u0 com.tencent.mm/com.tencent.mm.ui.LauncherUI} */
     private static String parse(String out) {
         if (out == null) return "";
-        int i = out.indexOf(" u0 ");
-        if (i < 0) return "";
-        String rest = out.substring(i + 4).trim();
+        // 兼容 u0（主用户）、u10（工作资料）、u999（双开）
+        java.util.regex.Matcher um = java.util.regex.Pattern
+                .compile(" u\\d+ ").matcher(out);
+        if (!um.find()) return "";
+        String rest = out.substring(um.end()).trim();
         int sp = rest.indexOf('/');
         if (sp > 0) return rest.substring(0, sp);
         int br = rest.indexOf('}');

@@ -239,7 +239,10 @@ public final class LocalSkills {
         if (!m.find()) return "你想定几点的？说个时间，比如「7:30」。";
         int hour = Integer.parseInt(m.group(1));
         int minute = m.group(2) == null ? 0 : Integer.parseInt(m.group(2));
-        if (q.contains("下午") && hour < 12) hour += 12;
+        boolean pm = q.contains("下午") || q.contains("晚上") || q.contains("傍晚") || q.contains("夜里");
+        boolean am = q.contains("早上") || q.contains("上午") || q.contains("凌晨");
+        if (pm && hour < 12) hour += 12;
+        if (am && hour == 12) hour = 0;
         if (hour > 23 || minute > 59) return "这个时间不太对，换一个？";
         try {
             Intent i = new Intent(AlarmClock.ACTION_SET_ALARM);

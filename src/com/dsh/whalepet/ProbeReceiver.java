@@ -14,7 +14,7 @@ public class ProbeReceiver extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
         // 只接受 root(0) / shell(2000) / 本应用 发来的调试广播
         int uid = android.os.Binder.getCallingUid();
-        if (uid != android.os.Process.myUid() && uid != 0 && uid != 2000) {
+        if (uid != android.os.Process.myUid() && uid != 0 && uid != 1000 && uid != 2000) {
             android.util.Log.w("WhalePet", "probe rejected from uid " + uid);
             return;
         }
@@ -65,6 +65,14 @@ public class ProbeReceiver extends BroadcastReceiver {
             String q = intent.getStringExtra("text");
             Bg.run(() -> Log.i("WhalePet", "weather probe [" + q + "] -> "
                     + LocalSkills.weather(q == null ? "北京天气" : q, "")));
+            return;
+        }
+        if ("com.dsh.whalepet.MEM_PROBE".equals(intent.getAction())) {
+            Bg.run(() -> {
+                String block = MemClient.recall(context, "测试");
+                android.util.Log.i("WhalePet", "mem enabled=" + MemClient.enabled(context)
+                        + " recall=[" + block.replace('\n', '|') + "]");
+            });
             return;
         }
         if ("com.dsh.whalepet.SCAN_PROBE".equals(intent.getAction())) {

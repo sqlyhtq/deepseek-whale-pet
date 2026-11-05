@@ -143,7 +143,13 @@ public class ChatEngine {
                     if (t.isEmpty() || t.length() > 60 || !seen.add(t)) continue;
                     merged.add(new MemoryStore.Fact(t, System.currentTimeMillis()));
                 }
-                if (!merged.isEmpty()) MemoryStore.save(ctx, merged);
+                if (!merged.isEmpty()) {
+                    MemoryStore.save(ctx, merged);
+                    // 同步到记忆服务，QQ 机器人那边也能用得上
+                    if (MemClient.enabled(ctx)) {
+                        for (MemoryStore.Fact f : merged) MemClient.addFact(ctx, f.text);
+                    }
+                }
                 Log.i(TAG, "memory updated: " + merged.size() + " facts");
             } catch (Throwable t) {
                 Log.w(TAG, "memory extract failed: " + t);

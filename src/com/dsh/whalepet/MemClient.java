@@ -47,35 +47,90 @@ public final class MemClient {
         return !url(c).isEmpty();
     }
 
-    /** 召回：最近确认的事实 + 最近一份摘要。 */
+    /** 召回：相关的历史片段 + 已确认事实 + 最近摘要。 */
     public static String recall(Context c, String query) {
         if (!enabled(c)) return "";
+        String scope = enc(scope(c));
+        StringBuilder sb = new StringBuilder();
+
+        // 1) 语义相关片段
         try {
-            StringBuilder sb = new StringBuilder();
-            JSONArray facts = getJson(c, "/facts?scope=" + enc(scope(c)) + "&k=8");
-            if (facts != null && facts.length() > 0) {
-                sb.append("\n\n你从以往对话里记住的事（自然使用，别逐条复述）：\n");
-                for (int i = 0; i < facts.length(); i++) {
-                    JSONObject o = facts.optJSONObject(i);
-                    String t = o == null ? "" : o.optString("text", "");
+            String rec = getText(c, "/recall?scope=" + scope + "&query=" + enc(query == null ? "" : query) + "&k=4");
+            JSONArray lines = jsonArray(rec, "lines");
+            if (lines != null && lines.length() > 0) {
+                sb.append("\n\n你和用户以前聊过的相关片段：\n");
+                for (int i = 0; i < lines.length(); i++) {
+                    String t = lines.optString(i, "").trim();
                     if (!t.isEmpty()) sb.append("- ").append(t).append('\n');
                 }
             }
-            String summary = getText(c, "/summary?scope=" + enc(scope(c)) + "&n=1");
-            if (summary != null && !summary.trim().isEmpty()) {
-                sb.append("\n之前聊过（摘要）：\n").append(summary.trim()).append('\n');
+        } catch (Throwable ignored) {
+        }
+
+        // 2) 已确认的事实
+        try {
+            JSONArray facts = jsonArray(getText(c, "/facts?scope=" + scope + "&k=8"), "facts");
+            if (facts != null && facts.length() > 0) {
+                sb.append("\n\n你记得关于用户的事（自然使用，不要逐条复述）：\n");
+                for (int i = 0; i < facts.length(); i++) {
+                    JSONObject o = facts.optJSONObject(i);
+                    String t = o == null ? facts.optString(i, "") : o.optString("text", "");
+                    if (!t.isEmpty()) sb.append("- ").append(t).append('\n');
+                }
             }
-            return sb.toString();
+        } catch (Throwable ignored) {
+        }
+
+        // 3) 最近一份摘要
+        try {
+            String raw = getText(c, "/summary?scope=" + scope + "&n=1");
+            String summary = jsonString(raw, "summary");
+            if (summary != null && !summary.trim().isEmpty()) {
+                sb.append("\n\n之前聊过（摘要）：\n").append(summary.trim()).append('\n');
+            }
+        } catch (Throwable ignored) {
+        }
+
+        return sb.toString();
+    }
+
+    private static JSONArray jsonArray(String raw, String key) {
+        if (raw == null) return null;
+        try {
+            JSONObject o = new JSONObject(raw);
+            if (o.has(key)) return o.optJSONArray(key);
+            if (o.has("items")) return o.optJSONArray("items");
+            return null;
         } catch (Throwable t) {
-            Log.w(TAG, "mem recall failed: " + t);
-            return "";
+            try {
+                return new JSONArray(raw);
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
+    }
+
+    private static String jsonString(String raw, String key) {
+        if (raw == null) return null;
+        try {
+            JSONObject o = new JSONObject(raw);
+            return o.optString(key, "");
+        } catch (Throwable t) {
+            return raw.startsWith("{") ? null : raw;
         }
     }
 
     /** 写回一条对话。 */
+    /** 写入一条已确认的事实（会出现在 /facts 里，固定注入）。 */
+    public static void addFact(Context c, String text) {
+        add(c, "fact", text);
+    }
+
     public static void add(Context c, String role, String text) {
         if (!enabled(c) || text == null || text.isEmpty()) return;
-        if ("assistant".equals(role)) role = "user";  // 服务端只有 user/assistant 之外的约束由它自己处理
+        // 服务端用中文角色名区分事实/摘要；普通对话保持 user/assistant
+        if ("fact".equals(role)) role = "事实";
+        else if ("summary".equals(role)) role = "摘要";
         try {
             JSONObject body = new JSONObject();
             body.put("scope", scope(c));
@@ -118,25 +173,6 @@ public final class MemClient {
         }
     }
 
-    private static JSONArray getJson(Context c, String path) {
-        String s = getText(c, path);
-        if (s == null) return null;
-        try {
-            JSONObject o = new JSONObject(s);
-            if (o.has("facts")) return o.getJSONArray("facts");
-            for (String k : new String[]{"items", "data", "entries"}) {
-                if (o.has(k)) return o.getJSONArray(k);
-            }
-            return null;
-        } catch (Throwable t) {
-            try {
-                return new JSONArray(s);
-            } catch (Throwable ignored) {
-                return null;
-            }
-        }
-    }
-
     private static void post(Context c, String path, JSONObject body) {
         HttpURLConnection conn = null;
         try {
@@ -151,7 +187,17 @@ public final class MemClient {
             try (OutputStream os = conn.getOutputStream()) {
                 os.write(body.toString().getBytes(StandardCharsets.UTF_8));
             }
-            if (conn.getResponseCode() >= 400) Log.w(TAG, "mem http " + conn.getResponseCode());
+            int code = conn.getResponseCode();
+            java.io.InputStream in = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            StringBuilder rb = new StringBuilder();
+            if (in != null) {
+                try (BufferedReader br = new BufferedReader(
+                        new InputStreamReader(in, StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = br.readLine()) != null) rb.append(line);
+                }
+            }
+            Log.i(TAG, "mem post " + path + " -> " + code + " " + rb);
         } catch (Throwable t) {
             Log.w(TAG, "mem post failed: " + t);
         } finally {

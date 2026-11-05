@@ -69,9 +69,26 @@ public class ProbeReceiver extends BroadcastReceiver {
         }
         if ("com.dsh.whalepet.MEM_PROBE".equals(intent.getAction())) {
             Bg.run(() -> {
+                android.content.SharedPreferences sp =
+                        context.getSharedPreferences("pet", context.MODE_PRIVATE);
+                String u = sp.getString("memServerUrl", "");
+                String sc = sp.getString("memScope", "pet");
+                String tk = SecureStore.get(sp, "memToken");
                 String block = MemClient.recall(context, "测试");
-                android.util.Log.i("WhalePet", "mem enabled=" + MemClient.enabled(context)
-                        + " recall=[" + block.replace('\n', '|') + "]");
+                android.util.Log.i("WhalePet", "mem url=[" + u + "] scope=[" + sc
+                        + "] tokenLen=" + tk.length() + " recall=["
+                        + block.replace('\n', '|') + "]");
+            });
+            return;
+        }
+        if ("com.dsh.whalepet.MEM_SEED".equals(intent.getAction())) {
+            String text = intent.getStringExtra("text");
+            Bg.run(() -> {
+                MemClient.addFact(context, text == null ? "测试记忆：用户喜欢大肥鱼音色" : text);
+                android.util.Log.i("WhalePet", "mem seed done");
+                String block = MemClient.recall(context,
+                        text == null ? "测试" : text);
+                android.util.Log.i("WhalePet", "mem recall2=[" + block.replace('\n', '|') + "]");
             });
             return;
         }

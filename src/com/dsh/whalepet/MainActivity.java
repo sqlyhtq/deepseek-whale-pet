@@ -294,6 +294,19 @@ public class MainActivity extends Activity {
         final EditText memScopeField = field(root, "记忆分组（默认 pet）",
                 getSharedPreferences("pet", MODE_PRIVATE).getString("memScope", "pet"), false);
 
+        // 记忆服务三个字段：失焦即保存，避免用户忘了点「保存」
+        android.view.View.OnFocusChangeListener memSaver = (v, has) -> {
+            if (has) return;
+            android.content.SharedPreferences sp2 = getSharedPreferences("pet", MODE_PRIVATE);
+            sp2.edit().putString("memServerUrl", memUrl.getText().toString().trim())
+                    .putString("memScope", memScopeField.getText().toString().trim())
+                    .apply();
+            SecureStore.put(sp2, "memToken", memTokenField.getText().toString().trim());
+        };
+        memUrl.setOnFocusChangeListener(memSaver);
+        memTokenField.setOnFocusChangeListener(memSaver);
+        memScopeField.setOnFocusChangeListener(memSaver);
+
         Button wakeDiagBtn = new Button(this);
         wakeDiagBtn.setText("唤醒诊断");
         wakeDiagBtn.setAllCaps(false);

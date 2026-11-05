@@ -6,6 +6,8 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.text.InputType;
 import android.view.Gravity;
@@ -27,6 +29,17 @@ public class MainActivity extends Activity {
     private TextView status;
     private Button toggle;
     private EditText baseUrl, apiKey, model, breezyKey;
+
+    private final Handler ui = new Handler(Looper.getMainLooper());
+    /** 点击后这段时间内不刷新按钮文案，等服务的异步启停落定。 */
+    private long pendingUntil = 0L;
+    private final Runnable poll = new Runnable() {
+        @Override
+        public void run() {
+            refresh();
+            ui.postDelayed(this, 400);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -69,13 +82,26 @@ public class MainActivity extends Activity {
                     requestOverlay();
                     return;
                 }
+                // 服务的启停是异步的：先给即时反馈，按钮锁住到状态落定
+                pendingUntil = System.currentTimeMillis() + 900;
+                toggle.setEnabled(false);
                 if (PetService.isRunning) {
-                    stopService(new Intent(MainActivity.this, PetService.class));
+                    // 先落 enabled=false，避免 onResume 的自动拉起把刚关掉的又拉起来
                     PetService.setEnabled(MainActivity.this, false);
+                    stopService(new Intent(MainActivity.this, PetService.class));
+                    toggle.setText("正在关闭…");
+                    status.setText("正在收起桌宠…");
                 } else {
                     startPet();
+                    toggle.setText("正在开启…");
+                    status.setText("正在唤醒桌宠…");
                 }
-                refresh();
+                ui.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        refresh();
+                    }
+                }, 500);
             }
         });
 
@@ -542,18 +568,36 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        // 服务真正启停后回调刷新，避免按钮停留在旧文案
+        PetService.setRunningListener(running -> {
+            pendingUntil = 0L;   // 状态已落定，立刻解除“正在…”锁定
+            refresh();
+        });
         if (Settings.canDrawOverlays(this) && !PetService.isRunning && PetService.wasEnabled(this)) {
             startPet();
         }
         refresh();
+        ui.post(poll);
         Log.i("WhalePet", "diagnostics:\n" + diagnostics());
     }
 
+    @Override
+    protected void onPause() {
+        super.onPause();
+        PetService.setRunningListener(null);
+        ui.removeCallbacks(poll);
+    }
+
     private void startPet() {
-        Intent i = new Intent(this, PetService.class);
-        if (Build.VERSION.SDK_INT >= 26) startForegroundService(i);
-        else startService(i);
-        PetService.setEnabled(this, true);
+        try {
+            Intent i = new Intent(this, PetService.class);
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(i);
+            else startService(i);
+            // enabled 由 Service.onCreate 落定：启动失败不会留下“已开启”的假状态
+        } catch (Throwable t) {
+            PetService.setEnabled(this, false);
+            Toast.makeText(this, "启动失败：" + t.getMessage(), Toast.LENGTH_LONG).show();
+        }
     }
 
     private void requestOverlay() {
@@ -563,6 +607,9 @@ public class MainActivity extends Activity {
     }
 
     private void refresh() {
+        // 刚点过按钮，状态还没落定，保留“正在…”文案
+        if (System.currentTimeMillis() < pendingUntil) return;
+        toggle.setEnabled(true);
         boolean can = Settings.canDrawOverlays(this);
         if (!can) {
             status.setText("需要「显示在其他应用上层」权限");

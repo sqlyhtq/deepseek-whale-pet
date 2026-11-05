@@ -55,30 +55,35 @@ Android 桌面上的鲸鱼女仆：只在桌面显示，可拖动、可玩耍，
 
 ## 构建
 
-本项目用 JDK + aapt2 直接打包，不依赖 Android Studio。
+不依赖 Android Studio，两条路可选。
+
+### 方式一：`build-local.sh`（推荐，仓库内自带）
 
 ```bash
-# 依赖
-#   JDK 17+
-#   aapt2（Android build-tools）
-#   android.jar（API 34）
-#   Vosk AAR、JNA、Shizuku API/Provider/AIDL/Shared、r8.jar、apksigner.jar
-# 放到 build/ 下，然后在 build/build.sh 顶部改这几个变量：
-#   J  = android.jar
-#   AAPT2 = aapt2 可执行文件
-#   B/vosk/... = 上述 AAR 解包后的 classes.jar
+# 依赖：JDK 17、Android SDK Platform 34、Build-Tools 34.0.0
+bash scripts/fetch-assets.sh       # 拉取 Vosk 小模型（66MB）
+bash build-local.sh                # 小模型版 → dafeiyu-small-debug.apk
+bash build-local.sh big            # 大模型版（需 assets/vosk-big.zip）
+```
 
-bash scripts/fetch-assets.sh   # 拉取 Vosk 小模型（66MB）
+SDK 路径用 `ANDROID_SDK_ROOT` 指定，默认回退到 `../.android-build/sdk`；
+依赖 AAR 缺失时会自动从 Maven Central 下载。细节见 [BUILD.md](BUILD.md)。
+
+> ⚠️ **签名说明**：`build-local.sh` 用自动生成的 `debug.keystore` 签名，
+> 与官方 Release 的 keystore **不同**。因此自编译包**不能直接覆盖安装**官方版，
+> 需要先卸载官方版（会丢失本地设置与记忆），或把自己的 keystore 放到脚本同级目录并改
+> `KEYTOOL` 后的参数。
+
+### 方式二：手动打包（作者本地流程）
+
+```bash
+# 依赖：JDK 17+、aapt2、android.jar(API 34)、
+#       Vosk/JNA/Shizuku 的 classes.jar、r8.jar、apksigner.jar
+bash scripts/fetch-assets.sh
 bash build/build.sh            # 产出 petapp/whale-pet.apk
 ```
 
-安装：
-
-```bash
-adb install -r whale-pet.apk
-```
-
----
+`build/` 目录被 `.gitignore` 排除，属于作者本地环境，不随仓库分发。
 
 ## 目录结构
 

@@ -122,9 +122,8 @@ public class ChatPanel extends android.widget.FrameLayout {
 
     /** 像桌面窗口那样：四条边 + 四个角都能拖，拖哪边动哪边。 */
     private void addResizeHandles() {
-        // 角热区不能太大，否则会盖住标题栏右侧的关闭按钮（实测 40dp 时 ✕ 几乎点不到）
-        int edge = dp(12);
-        int corner = dp(26);
+        int edge = dp(14);
+        int corner = dp(40);
         // 先加四条边，再加四个角：后加的在上层，角必须压住边的两端，
         // 否则拖角时只会命中单边（表现为只能单向缩放）
         // 四条边只覆盖「中间段」，两端留给角，避免边的热区盖住角
@@ -271,18 +270,11 @@ public class ChatPanel extends android.widget.FrameLayout {
 
         TextView close = new TextView(ctx);
         close.setText("✕");
-        close.setTextSize(20);
-        close.setTextColor(Color.parseColor("#27334F"));
-        close.setGravity(Gravity.CENTER);
-        // 44dp 触控区（低于 48dp 的按钮很难点中），并让开右上角 26dp 的缩放手柄
-        GradientDrawable closeBg = new GradientDrawable();
-        closeBg.setShape(GradientDrawable.OVAL);
-        closeBg.setColor(Color.parseColor("#E3EEFF"));
-        close.setBackground(closeBg);
+        close.setTextSize(18);
+        close.setTextColor(Color.parseColor("#5D739B"));
+        close.setPadding(dp(10), dp(4), dp(10), dp(4));
         close.setOnClickListener(v -> close());
-        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(dp(44), dp(44));
-        closeLp.rightMargin = dp(30);
-        bar.addView(close, closeLp);
+        bar.addView(close);
         card.addView(bar);
 
         scroll = new ScrollView(ctx);
@@ -406,7 +398,7 @@ public class ChatPanel extends android.widget.FrameLayout {
         handsFree = true;
         listening = true;
         micBtn.setAlpha(0.55f);
-        status.setText("正在加载离线语音模型…");
+        status.setText(VoiceInput.isModelLoaded() ? "正在听…" : "正在加载离线语音模型…");
         android.util.Log.i("WhalePet", "chat voice start");
         voice.start(ctx, new VoiceInput.Listener() {
             @Override

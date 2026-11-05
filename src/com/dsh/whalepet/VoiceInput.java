@@ -69,6 +69,84 @@ public class VoiceInput {
     /** 换模型后调用，让下次识别重新加载。 */
     public static synchronized void reset() {
         model = null;
+        loadedBig = false;
+    }
+
+    private static volatile boolean assetsPrepared;
+    private static final Object EXTRACT_LOCK = new Object();
+
+    /**
+     * 启动时就预先把 assets 里的模型解压到私有目录：
+     * 第一次说话才解压的话，要等几十秒，体验很差。
+     */
+    public static void prepareAssets(final Context ctx) {
+        if (assetsPrepared) return;
+        assetsPrepared = true;
+        Bg.run(() -> {
+            try {
+                ensureExtracted(ctx);
+                Log.i(TAG, "vosk small model ready (prepared at startup)");
+            } catch (Throwable t) {
+                Log.w(TAG, "prepare assets failed: " + t);
+            }
+        });
+    }
+
+    private static void ensureExtracted(Context ctx) throws Exception {
+        synchronized (EXTRACT_LOCK) {
+            File dir = new File(ctx.getFilesDir(), "vosk-cn");
+            File ok = new File(dir, ".ready");
+            if (ok.exists()) return;
+            copyAssetDir(ctx, "vosk", dir);
+            //noinspection ResultOfMethodCallIgnored
+            ok.createNewFile();
+        }
+    }
+
+    private static volatile boolean loadedBig;
+    private static volatile boolean warmed;
+
+    /**
+     * 后台预加载模型：第一次点麦克风才加载的话，聊天窗会先卡一句“正在加载离线语音模型…”。
+     * 大模型不预热——启动就吃 3GB 不划算，而且大模型本来就该有加载提示。
+     */
+    public static void warmUp(final Context ctx) {
+        if (warmed) return;
+        boolean wantBig = ctx.getSharedPreferences("pet", Context.MODE_PRIVATE)
+                .getString("asrModel", "big").equals("big");
+        if (wantBig && BigModel.isReady(ctx)) return;
+        warmed = true;
+        Bg.run(() -> {
+            long t0 = System.currentTimeMillis();
+            try {
+                model(ctx);
+                Log.i(TAG, "asr warmed up in " + (System.currentTimeMillis() - t0) + "ms");
+            } catch (Throwable t) {
+                Log.w(TAG, "asr warmup failed: " + t);
+            }
+        });
+    }
+
+    /** 当前真正生效的模型，给设置页显示，避免“以为在用大模型”。 */
+    public static String activeModelLabel(Context ctx) {
+        boolean bigReady = BigModel.isReady(ctx);
+        boolean wantBig = ctx.getSharedPreferences("pet", Context.MODE_PRIVATE)
+                .getString("asrModel", "big").equals("big");
+        String name;
+        if (wantBig && bigReady) name = "大模型";
+        else if (wantBig) name = "小模型（大模型未下载，已自动回落）";
+        else name = "小模型（内置）";
+        if (model == null) return name + " · 待加载";
+        return name + " · 已加载";
+    }
+
+    public static boolean bigLoaded() {
+        return loadedBig;
+    }
+
+    /** 模型是否已经在内存里（预热完成后为 true）。 */
+    public static boolean isModelLoaded() {
+        return model != null;
     }
 
     public static synchronized Model model(Context ctx) throws Exception {
@@ -78,16 +156,12 @@ public class VoiceInput {
         Model big = wantBig ? bigModel(ctx) : null;
         if (big != null) {
             model = big;
+            loadedBig = true;
             return model;
         }
-        File dir = new File(ctx.getFilesDir(), "vosk-cn");
-        File ok = new File(dir, ".ready");
-        if (!ok.exists()) {
-            copyAssetDir(ctx, "vosk", dir);
-            //noinspection ResultOfMethodCallIgnored
-            ok.createNewFile();
-        }
-        model = new Model(dir.getAbsolutePath());
+        ensureExtracted(ctx);
+        model = new Model(new File(ctx.getFilesDir(), "vosk-cn").getAbsolutePath());
+        loadedBig = false;
         return model;
     }
 

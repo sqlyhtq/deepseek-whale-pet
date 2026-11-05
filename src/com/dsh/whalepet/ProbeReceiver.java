@@ -67,6 +67,13 @@ public class ProbeReceiver extends BroadcastReceiver {
                     + LocalSkills.weather(q == null ? "北京天气" : q, "")));
             return;
         }
+        if ("com.dsh.whalepet.SCAN_PROBE".equals(intent.getAction())) {
+            String path = intent.getStringExtra("path");
+            if (path == null) return;
+            android.media.MediaScannerConnection.scanFile(context, new String[]{path}, null,
+                    (p, uri) -> android.util.Log.i("WhalePet", "scanned " + p + " -> " + uri));
+            return;
+        }
         if ("com.dsh.whalepet.SAY_PROBE".equals(intent.getAction())) {
             String t = intent.getStringExtra("text");
             Tts tts = new Tts(context);

@@ -13,3 +13,16 @@ local.properties
 # 大模型（体积太大，不随仓库分发）
 assets/vosk/
 assets/live2d/whale/outfits/
+
+# 本地构建
+build-local/
+*.keystore
+.deps/
+assets/vosk-big.zip
+dafeiyu-*.apk
+
+# 本地打包
+.deps/
+build-local/
+debug.keystore
+assets/vosk-big.zip

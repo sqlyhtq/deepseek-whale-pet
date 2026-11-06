@@ -81,6 +81,24 @@ public final class MemClient {
         } catch (Throwable ignored) {
         }
 
+        // 2.5) 共享画像（profile scope：桌宠与 QQ 机器人共写）
+        try {
+            JSONArray pfacts = jsonArray(getText(c, "/facts?scope=profile&k=5"), "facts");
+            if (pfacts != null && pfacts.length() > 0) {
+                StringBuilder blk = new StringBuilder();
+                for (int i = 0; i < pfacts.length(); i++) {
+                    JSONObject o = pfacts.optJSONObject(i);
+                    String t = o == null ? pfacts.optString(i, "") : o.optString("text", "");
+                    t = t == null ? "" : t.trim();
+                    if (!t.isEmpty()) blk.append("- ").append(t).append('\n');
+                }
+                if (blk.length() > 0) {
+                    sb.append("\n\n关于用户的画像（共享记忆，自然运用，不要复述原文）：\n").append(blk);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
         // 3) 最近一份摘要
         try {
             String raw = getText(c, "/summary?scope=" + scope + "&n=1");
@@ -123,17 +141,22 @@ public final class MemClient {
     /** 写回一条对话。 */
     /** 写入一条已确认的事实（会出现在 /facts 里，固定注入）。 */
     public static void addFact(Context c, String text) {
-        add(c, "fact", text);
+        addTo(c, scope(c), "事实", text);
+        addTo(c, "profile", "事实", text);   // 共享画像：QQ 机器人也能读
     }
 
     public static void add(Context c, String role, String text) {
+        addTo(c, scope(c), role, text);
+    }
+
+    private static void addTo(Context c, String scope, String role, String text) {
         if (!enabled(c) || text == null || text.isEmpty()) return;
         // 服务端用中文角色名区分事实/摘要；普通对话保持 user/assistant
         if ("fact".equals(role)) role = "事实";
         else if ("summary".equals(role)) role = "摘要";
         try {
             JSONObject body = new JSONObject();
-            body.put("scope", scope(c));
+            body.put("scope", scope);
             body.put("role", role);
             body.put("text", text);
             post(c, "/add", body);
@@ -141,7 +164,6 @@ public final class MemClient {
             Log.w(TAG, "mem add failed: " + t);
         }
     }
-
     private static String enc(String s) {
         try {
             return URLEncoder.encode(s, "UTF-8");

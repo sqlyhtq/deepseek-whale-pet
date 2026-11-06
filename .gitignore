@@ -26,3 +26,4 @@ dafeiyu-*.apk
 build-local/
 debug.keystore
 assets/vosk-big.zip
+*.bak-*
